@@ -1,0 +1,35 @@
+import dotenv from 'dotenv';
+import express from 'express';
+import cors from 'cors';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: join(__dirname, '../.env') });
+
+import authRoutes from './routes/auth.js';
+import sessionRoutes from './routes/sessions.js';
+import chatRoutes from './routes/chat.js';
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+app.use(cors());
+app.use(express.json());
+
+// API routes
+app.use('/api/auth', authRoutes);
+app.use('/api/sessions', sessionRoutes);
+app.use('/api/chat', chatRoutes);
+
+// Serve static files in production
+app.use(express.static(join(__dirname, '../client/dist')));
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/api')) {
+    res.sendFile(join(__dirname, '../client/dist/index.html'));
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
