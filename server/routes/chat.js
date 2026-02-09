@@ -8,7 +8,9 @@ const router = Router();
 router.use(authenticate);
 
 function getOpenAI() {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const key = process.env.OPENAI_API_KEY;
+  console.log('OpenAI key loaded:', key ? `${key.substring(0, 8)}...` : 'MISSING');
+  return new OpenAI({ apiKey: key });
 }
 
 // POST /api/chat - send a message and get AI response
@@ -70,7 +72,7 @@ router.post('/', async (req, res) => {
 
     res.json({ message: assistantMessage });
   } catch (err) {
-    console.error('OpenAI API error:', err.message);
+    console.error('OpenAI API error:', err.message, err.code, err.status, err.type);
     res.status(500).json({ error: 'שגיאה בתקשורת עם ה-AI. נסה שוב.' });
   }
 });
@@ -131,7 +133,7 @@ router.post('/finish', async (req, res) => {
 
     res.json({ message: feedbackMessage });
   } catch (err) {
-    console.error('OpenAI API error:', err.message);
+    console.error('OpenAI API error:', err.message, err.code, err.status, err.type);
     res.status(500).json({ error: 'שגיאה בתקשורת עם ה-AI. נסה שוב.' });
   }
 });
