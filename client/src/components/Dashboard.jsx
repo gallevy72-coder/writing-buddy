@@ -8,6 +8,7 @@ export default function Dashboard({ user, token, onLogout }) {
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState('homework');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
   const api = axios.create({
@@ -33,6 +34,7 @@ export default function Dashboard({ user, token, onLogout }) {
     e.preventDefault();
     if (!newTitle.trim()) return;
 
+    setError('');
     try {
       const { data } = await api.post('/api/sessions', {
         title: newTitle.trim(),
@@ -41,6 +43,7 @@ export default function Dashboard({ user, token, onLogout }) {
       navigate(`/session/${data.id}`);
     } catch (err) {
       if (err.response?.status === 401) onLogout();
+      else setError(err.response?.data?.error || err.message || 'שגיאה ביצירת סשן');
     }
   };
 
@@ -122,6 +125,12 @@ export default function Dashboard({ user, token, onLogout }) {
                 </button>
               </div>
             </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-3 text-center font-semibold mb-4">
+                {error}
+              </div>
+            )}
 
             <button
               type="submit"
