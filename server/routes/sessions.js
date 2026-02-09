@@ -32,12 +32,18 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: 'סוג לא תקין' });
   }
 
-  const result = db.prepare(
-    'INSERT INTO sessions (user_id, title, type) VALUES (?, ?, ?)'
-  ).run(req.user.id, title, type);
+  try {
+    console.log('Creating session:', { userId: req.user.id, title, type });
+    const result = db.prepare(
+      'INSERT INTO sessions (user_id, title, type) VALUES (?, ?, ?)'
+    ).run(req.user.id, title, type);
 
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(session);
+    const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json(session);
+  } catch (err) {
+    console.error('Session creation error:', err.message);
+    res.status(500).json({ error: 'שגיאה ביצירת סשן: ' + err.message });
+  }
 });
 
 // GET /api/sessions/:id - get session with messages

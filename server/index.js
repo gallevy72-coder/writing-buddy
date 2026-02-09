@@ -17,6 +17,11 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', env: !!process.env.OPENAI_API_KEY, node: process.version });
+});
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/sessions', sessionRoutes);
