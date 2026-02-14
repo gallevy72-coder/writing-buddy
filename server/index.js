@@ -19,29 +19,28 @@ app.use(express.json());
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', env: !!process.env.OPENAI_API_KEY, node: process.version });
+  res.json({ status: 'ok', env: !!process.env.GEMINI_API_KEY, node: process.version });
 });
 
-// OpenAI connection test
-app.get('/api/test-openai', async (req, res) => {
-  const key = process.env.OPENAI_API_KEY;
+// Gemini connection test
+app.get('/api/test-gemini', async (req, res) => {
+  const key = process.env.GEMINI_API_KEY;
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: 'Say hi' }],
-        max_tokens: 5,
-      }),
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'Say hi' }] }],
+          generationConfig: { maxOutputTokens: 5 },
+        }),
+      }
+    );
     const data = await response.text();
-    res.json({ status: response.status, keyPrefix: key?.substring(0, 10), keyLength: key?.length, response: data.substring(0, 300) });
+    res.json({ status: response.status, keyLength: key?.length, response: data.substring(0, 300) });
   } catch (err) {
-    res.json({ error: err.message, keyPrefix: key?.substring(0, 10), keyLength: key?.length });
+    res.json({ error: err.message, keyLength: key?.length });
   }
 });
 
