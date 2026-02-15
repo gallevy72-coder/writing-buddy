@@ -19,8 +19,9 @@ app.use(express.json());
 
 // Health check
 app.get('/api/health', (req, res) => {
-  const envKeys = Object.keys(process.env).filter(k => k.includes('GRO') || k.includes('JWT') || k.includes('API'));
-  res.json({ status: 'ok', env: !!process.env.GEMINI_API_KEY, envKeys, node: process.version });
+  const envKeys = Object.keys(process.env).filter(k => !k.startsWith('RAILWAY') && !k.startsWith('npm') && !k.startsWith('NODE') && !k.startsWith('PATH') && !k.startsWith('HOME'));
+  const keyPreview = process.env.GEMINI_API_KEY?.substring(0, 4);
+  res.json({ status: 'ok', envKeys, keyPreview, node: process.version });
 });
 
 // Groq connection test
