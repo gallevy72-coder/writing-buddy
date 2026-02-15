@@ -20,12 +20,12 @@ app.use(express.json());
 // Health check
 app.get('/api/health', (req, res) => {
   const envKeys = Object.keys(process.env).filter(k => k.includes('GRO') || k.includes('JWT') || k.includes('API'));
-  res.json({ status: 'ok', env: !!process.env.GROQ_API_KEY, envKeys, node: process.version });
+  res.json({ status: 'ok', env: !!process.env.GEMINI_API_KEY, envKeys, node: process.version });
 });
 
 // Groq connection test
 app.get('/api/test-ai', async (req, res) => {
-  const key = process.env.GROQ_API_KEY;
+  const key = process.env.GEMINI_API_KEY;
   try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
