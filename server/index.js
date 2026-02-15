@@ -19,7 +19,8 @@ app.use(express.json());
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', env: !!process.env.GROQ_API_KEY, node: process.version });
+  const envKeys = Object.keys(process.env).filter(k => k.includes('GRO') || k.includes('JWT') || k.includes('API'));
+  res.json({ status: 'ok', env: !!process.env.GROQ_API_KEY, envKeys, node: process.version });
 });
 
 // Groq connection test
