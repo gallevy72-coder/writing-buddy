@@ -62,4 +62,5 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`API key preview: ${process.env.GEMINI_API_KEY?.substring(0, 4)}`);
 });
