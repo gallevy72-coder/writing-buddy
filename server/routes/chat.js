@@ -3,6 +3,8 @@ import db from '../db.js';
 import { authenticate } from '../middleware/auth.js';
 import { SYSTEM_PROMPT } from '../systemPrompt.js';
 
+const GROQ_KEY = process.env.AI_KEY || (process.env.K1 + process.env.K2 + process.env.K3 + process.env.K4);
+
 const router = Router();
 router.use(authenticate);
 
@@ -11,7 +13,7 @@ async function callAI(messages, maxTokens = 1000) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.AI_KEY}`,
+      'Authorization': `Bearer ${GROQ_KEY}`,
     },
     body: JSON.stringify({
       model: 'llama-3.3-70b-versatile',
