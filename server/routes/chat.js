@@ -6,48 +6,29 @@ import { SYSTEM_PROMPT } from '../systemPrompt.js';
 const router = Router();
 router.use(authenticate);
 
-async function callGemini(messages, maxTokens = 1000) {
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  // Separate system message from conversation
-  const systemMsg = messages.find(m => m.role === 'system');
-  const chatMessages = messages.filter(m => m.role !== 'system');
-
-  // Convert OpenAI format to Gemini format
-  const contents = chatMessages.map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }],
-  }));
-
-  const body = {
-    contents,
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: maxTokens,
+async function callAI(messages, maxTokens = 1000) {
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
     },
-  };
-
-  if (systemMsg) {
-    body.systemInstruction = { parts: [{ text: systemMsg.content }] };
-  }
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }
-  );
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages,
+      temperature: 0.7,
+      max_tokens: maxTokens,
+    }),
+  });
 
   if (!response.ok) {
     const err = await response.text();
-    console.error('Gemini HTTP error:', response.status, err);
-    throw new Error(`Gemini error: ${response.status}`);
+    console.error('Groq HTTP error:', response.status, err);
+    throw new Error(`Groq error: ${response.status}`);
   }
 
   const data = await response.json();
-  return data.candidates[0].content.parts[0].text;
+  return data.choices[0].message.content;
 }
 
 // POST /api/chat - send a message and get AI response
@@ -84,7 +65,7 @@ router.post('/', async (req, res) => {
   ];
 
   try {
-    const assistantMessage = await callGemini(openaiMessages);
+    const assistantMessage = await callAI(openaiMessages);
 
     db.prepare(
       'INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)'
@@ -131,7 +112,7 @@ router.post('/finish', async (req, res) => {
   ];
 
   try {
-    const feedbackMessage = await callGemini(openaiMessages, 1500);
+    const feedbackMessage = await callAI(openaiMessages, 1500);
 
     db.prepare(
       'INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)'

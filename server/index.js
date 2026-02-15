@@ -19,24 +19,25 @@ app.use(express.json());
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', env: !!process.env.GEMINI_API_KEY, node: process.version });
+  res.json({ status: 'ok', env: !!process.env.GROQ_API_KEY, node: process.version });
 });
 
-// Gemini connection test
-app.get('/api/test-gemini', async (req, res) => {
-  const key = process.env.GEMINI_API_KEY;
+// Groq connection test
+app.get('/api/test-ai', async (req, res) => {
+  const key = process.env.GROQ_API_KEY;
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: 'Say hi' }] }],
-          generationConfig: { maxOutputTokens: 5 },
-        }),
-      }
-    );
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: 'Say hi' }],
+        max_tokens: 5,
+      }),
+    });
     const data = await response.text();
     res.json({ status: response.status, keyLength: key?.length, response: data.substring(0, 300) });
   } catch (err) {
