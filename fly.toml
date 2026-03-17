@@ -1,0 +1,20 @@
+app = 'writing-buddy-il'
+primary_region = 'fra'
+
+[build]
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+[env]
+  PORT = '3001'
+  NODE_ENV = 'production'
+  DB_PATH = '/data/writing-buddy.db'
+
+[[mounts]]
+  source = 'writing_buddy_data'
+  destination = '/data'

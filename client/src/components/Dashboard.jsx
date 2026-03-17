@@ -6,7 +6,7 @@ export default function Dashboard({ user, token, onLogout }) {
   const [sessions, setSessions] = useState([]);
   const [showNew, setShowNew] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newType, setNewType] = useState('homework');
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const navigate = useNavigate();
@@ -38,7 +38,7 @@ export default function Dashboard({ user, token, onLogout }) {
     try {
       const { data } = await api.post('/api/sessions', {
         title: newTitle.trim(),
-        type: newType,
+        type: 'free',
       });
       navigate(`/session/${data.id}`);
     } catch (err) {
@@ -96,34 +96,6 @@ export default function Dashboard({ user, token, onLogout }) {
                 placeholder="למשל: חיבור על החופשה שלי"
                 required
               />
-            </div>
-
-            <div className="mb-6">
-              <label className="block text-gray-600 font-semibold mb-2">סוג הכתיבה</label>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setNewType('homework')}
-                  className={`flex-1 py-3 rounded-xl text-lg font-semibold border-2 transition-all ${
-                    newType === 'homework'
-                      ? 'border-buddy-blue bg-blue-50 text-buddy-blue'
-                      : 'border-gray-200 text-gray-500'
-                  }`}
-                >
-                  📝 משימה מהמורה
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setNewType('free')}
-                  className={`flex-1 py-3 rounded-xl text-lg font-semibold border-2 transition-all ${
-                    newType === 'free'
-                      ? 'border-buddy-green bg-green-50 text-buddy-green'
-                      : 'border-gray-200 text-gray-500'
-                  }`}
-                >
-                  🎨 כתיבה חופשית
-                </button>
-              </div>
             </div>
 
             {error && (

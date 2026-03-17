@@ -12,8 +12,19 @@ export default function WritingSession({ user, token, onLogout }) {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState('');
+  const [toolUses, setToolUses] = useState({ idea: 0, rephrase: 0, fix: 0, opinion: 0, illustrate: 0 });
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+
+  const MAX_TOOL_USES = 2;
+
+  const tools = [
+    { key: 'idea', label: 'רעיון', emoji: '💡', color: 'bg-purple-500', message: 'אני צריך רעיון להמשך הסיפור. תן לי רעיון יצירתי שמתאים למה שכתבתי עד עכשיו.' },
+    { key: 'rephrase', label: 'ניסוח', emoji: '✍️', color: 'bg-green-500', message: 'עזור לי לנסח מחדש את מה שכתבתי. תציע ניסוח משופר שמתאים לכיתה ד\'.' },
+    { key: 'fix', label: 'תיקון', emoji: '🔧', color: 'bg-blue-600', message: 'בדוק את מה שכתבתי ותקן שגיאות כתיב, פיסוק ודקדוק.' },
+    { key: 'opinion', label: 'מה דעתך?', emoji: '❓', color: 'bg-yellow-500', message: 'מה דעתך על מה שכתבתי עד עכשיו? תן לי משוב קצר - מה טוב ומה אפשר לשפר.' },
+    { key: 'illustrate', label: 'איור', emoji: '🎨', color: 'bg-orange-400', message: 'תאר לי ציור שמתאים לסיפור שכתבתי עד עכשיו. תאר את הסצנה בפירוט כדי שאוכל לצייר אותה.' },
+  ];
 
   const api = axios.create({
     headers: { Authorization: `Bearer ${token}` },
@@ -27,39 +38,23 @@ export default function WritingSession({ user, token, onLogout }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  const GREETING = 'שלום! אני החבר לכתיבה שלך ✏️ איזה סיפור תרצה לכתוב היום?';
+
   const loadSession = async () => {
     try {
       const { data } = await api.get(`/api/sessions/${id}`);
       setSession(data);
-      setMessages(data.messages || []);
-
-      // If no messages yet, send initial greeting
-      if (!data.messages || data.messages.length === 0) {
-        await sendInitialMessage();
+      const msgs = data.messages || [];
+      if (msgs.length === 0) {
+        setMessages([{ role: 'assistant', content: GREETING, id: 'greeting' }]);
+      } else {
+        setMessages(msgs);
       }
     } catch (err) {
       if (err.response?.status === 401) onLogout();
       else if (err.response?.status === 404) navigate('/');
     } finally {
       setInitialLoading(false);
-    }
-  };
-
-  const sendInitialMessage = async () => {
-    setLoading(true);
-    try {
-      const { data } = await api.post('/api/chat', {
-        sessionId: parseInt(id),
-        message: 'שלום! אני רוצה להתחיל לכתוב.',
-      });
-
-      // Reload messages to get both user and assistant messages from DB
-      const sessionData = await api.get(`/api/sessions/${id}`);
-      setMessages(sessionData.data.messages || []);
-    } catch (err) {
-      setError('שגיאה בטעינת הצ\'אט');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -98,6 +93,60 @@ export default function WritingSession({ user, token, onLogout }) {
     } finally {
       setLoading(false);
       inputRef.current?.focus();
+    }
+  };
+
+  const sendToolMessage = async (tool) => {
+    if (loading || toolUses[tool.key] >= MAX_TOOL_USES) return;
+
+    setToolUses((prev) => ({ ...prev, [tool.key]: prev[tool.key] + 1 }));
+    setError('');
+
+    // Illustration uses a separate endpoint
+    if (tool.key === 'illustrate') {
+      const tempUserMsg = { role: 'user', content: 'צייר לי את הסיפור!', id: Date.now() };
+      setMessages((prev) => [...prev, tempUserMsg]);
+      setLoading(true);
+      try {
+        const { data } = await api.post('/api/chat/illustrate', {
+          sessionId: parseInt(id),
+        });
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: data.message, id: Date.now() + 1 },
+        ]);
+      } catch (err) {
+        if (err.response?.status === 401) { onLogout(); return; }
+        setError('שגיאה ביצירת האיור. נסו שוב.');
+        setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
+        setToolUses((prev) => ({ ...prev, illustrate: prev.illustrate - 1 }));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    const tempUserMsg = { role: 'user', content: tool.message, id: Date.now() };
+    setMessages((prev) => [...prev, tempUserMsg]);
+
+    setLoading(true);
+    try {
+      const { data } = await api.post('/api/chat', {
+        sessionId: parseInt(id),
+        message: tool.message,
+      });
+
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: data.message, id: Date.now() + 1 },
+      ]);
+    } catch (err) {
+      if (err.response?.status === 401) { onLogout(); return; }
+      setError(err.response?.data?.error || 'שגיאה בשליחת ההודעה. נסו שוב.');
+      setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
+      setToolUses((prev) => ({ ...prev, [tool.key]: prev[tool.key] - 1 }));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -209,7 +258,7 @@ export default function WritingSession({ user, token, onLogout }) {
         </div>
       )}
 
-      {/* Input */}
+      {/* Input + Tools */}
       {session?.status === 'active' && (
         <div className="bg-white border-t shadow-lg flex-shrink-0">
           <form
@@ -239,6 +288,30 @@ export default function WritingSession({ user, token, onLogout }) {
               שליחה
             </button>
           </form>
+
+          {/* Tool buttons */}
+          <div className="max-w-4xl mx-auto px-4 pb-3 flex justify-center gap-2">
+            {tools.map((tool) => {
+              const remaining = MAX_TOOL_USES - toolUses[tool.key];
+              const disabled = loading || remaining <= 0;
+              return (
+                <button
+                  key={tool.key}
+                  onClick={() => sendToolMessage(tool)}
+                  disabled={disabled}
+                  className={`${tool.color} text-white px-3 py-2 rounded-xl font-bold text-sm flex flex-col items-center gap-0.5 min-w-[60px] transition-all shadow ${
+                    disabled ? 'opacity-40 cursor-not-allowed' : 'hover:scale-105 hover:shadow-md'
+                  }`}
+                >
+                  <span className="text-lg">{tool.emoji}</span>
+                  <span className="text-xs">{tool.label}</span>
+                  {remaining > 0 && (
+                    <span className="text-[10px] opacity-80">({remaining})</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 

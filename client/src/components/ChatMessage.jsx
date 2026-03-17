@@ -1,3 +1,33 @@
+function renderContent(content) {
+  // Parse markdown images: ![alt](url) — supports long data: URLs
+  const imgRegex = /!\[([^\]]*)\]\((data:[^)]+|https?:\/\/[^)]+)\)/g;
+  const result = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = imgRegex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      result.push(content.slice(lastIndex, match.index));
+    }
+    result.push(
+      <img
+        key={match.index}
+        src={match[2]}
+        alt={match[1]}
+        className="rounded-xl mt-2 max-w-full block"
+        loading="lazy"
+      />
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    result.push(content.slice(lastIndex));
+  }
+
+  return result;
+}
+
 export default function ChatMessage({ message }) {
   const isUser = message.role === 'user';
 
@@ -21,9 +51,9 @@ export default function ChatMessage({ message }) {
           {isUser ? '🧒 אני' : '✏️ חבר לכתיבה'}
         </div>
 
-        {/* Message content - preserve line breaks */}
+        {/* Message content - preserve line breaks, render images */}
         <div className="text-base leading-relaxed whitespace-pre-wrap">
-          {message.content}
+          {renderContent(message.content)}
         </div>
       </div>
     </div>

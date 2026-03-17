@@ -19,32 +19,7 @@ app.use(express.json());
 
 // Health check
 app.get('/api/health', (req, res) => {
-  const envKeys = Object.keys(process.env).filter(k => !k.startsWith('RAILWAY') && !k.startsWith('npm') && !k.startsWith('NODE') && !k.startsWith('PATH') && !k.startsWith('HOME'));
-  const keyPreview = process.env.AI_KEY?.substring(0, 4);
-  res.json({ status: 'ok', envKeys, keyPreview, node: process.version });
-});
-
-// Groq connection test
-app.get('/api/test-ai', async (req, res) => {
-  const key = process.env.AI_KEY;
-  try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`,
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: 'Say hi' }],
-        max_tokens: 5,
-      }),
-    });
-    const data = await response.text();
-    res.json({ status: response.status, keyLength: key?.length, response: data.substring(0, 300) });
-  } catch (err) {
-    res.json({ error: err.message, keyLength: key?.length });
-  }
+  res.json({ status: 'ok', groq: !!process.env.GROQ_API_KEY, node: process.version });
 });
 
 // API routes
@@ -62,5 +37,4 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`API key preview: ${process.env.AI_KEY?.substring(0, 4)}`);
 });
