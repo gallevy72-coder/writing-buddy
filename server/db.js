@@ -1,52 +1,64 @@
-import Database from 'better-sqlite3';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import pg from 'pg';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbPath = process.env.DB_PATH || join(__dirname, 'writing-buddy.db');
-const db = new Database(dbPath);
+const { Pool } = pg;
 
-// Enable WAL mode for better concurrent access
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
-// Create tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    type TEXT CHECK(type IN ('homework', 'free')) NOT NULL,
-    status TEXT CHECK(status IN ('active', 'completed')) DEFAULT 'active',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id INTEGER NOT NULL,
-    role TEXT CHECK(role IN ('user', 'assistant', 'system')) NOT NULL,
-    content TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-  );
-`);
-
-// Migration: הוסף story_text אם עדיין לא קיים (בטוח לריצה חוזרת)
-try {
-  db.exec('ALTER TABLE sessions ADD COLUMN story_text TEXT DEFAULT NULL');
-  console.log('[DB] migrated: added story_text column');
-} catch {
-  // העמודה כבר קיימת — בסדר גמור
+if (!process.env.DATABASE_URL) {
+  console.warn('[DB] DATABASE_URL is not set');
 }
 
-export default db;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL?.includes('localhost')
+    ? false
+    : { rejectUnauthorized: false },
+});
+
+pool.on('error', (err) => {
+  console.error('[DB] Unexpected pool error', err);
+});
+
+export async function query(text, params) {
+  return pool.query(text, params);
+}
+
+export async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      title TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('homework', 'free')),
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed')),
+      story_text TEXT DEFAULT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER NOT NULL REFERENCES sessions(id),
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  // Safe migration in case table existed without story_text
+  await pool.query(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS story_text TEXT DEFAULT NULL`);
+
+  console.log('[DB] PostgreSQL initialized');
+}
+
+export default pool;

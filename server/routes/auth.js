@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import db from '../db.js';
+import { query } from '../db.js';
 
 const router = Router();
 
@@ -21,25 +21,28 @@ router.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'הסיסמה חייבת להכיל לפחות 4 תווים' });
   }
 
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
-  if (existing) {
-    return res.status(409).json({ error: 'שם המשתמש כבר תפוס' });
-  }
-
   try {
+    const existing = await query('SELECT id FROM users WHERE username = $1', [username]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'שם המשתמש כבר תפוס' });
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
-    const result = db.prepare(
-      'INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)'
-    ).run(username, passwordHash, displayName);
+    const result = await query(
+      'INSERT INTO users (username, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id',
+      [username, passwordHash, displayName]
+    );
+    const userId = result.rows[0].id;
 
     const token = jwt.sign(
-      { id: result.lastInsertRowid, username, displayName },
+      { id: userId, username, displayName },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    res.status(201).json({ token, user: { id: result.lastInsertRowid, username, displayName } });
+    res.status(201).json({ token, user: { id: userId, username, displayName } });
   } catch (err) {
+    console.error('Register error:', err.message);
     res.status(500).json({ error: 'שגיאה ביצירת המשתמש' });
   }
 });
@@ -52,12 +55,13 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'שם משתמש וסיסמה הם חובה' });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  if (!user) {
-    return res.status(401).json({ error: 'שם משתמש או סיסמה שגויים' });
-  }
-
   try {
+    const result = await query('SELECT * FROM users WHERE username = $1', [username]);
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(401).json({ error: 'שם משתמש או סיסמה שגויים' });
+    }
+
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
       return res.status(401).json({ error: 'שם משתמש או סיסמה שגויים' });
@@ -71,6 +75,7 @@ router.post('/login', async (req, res) => {
 
     res.json({ token, user: { id: user.id, username: user.username, displayName: user.display_name } });
   } catch (err) {
+    console.error('Login error:', err.message);
     res.status(500).json({ error: 'שגיאה בהתחברות' });
   }
 });

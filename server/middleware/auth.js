@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
-import db from '../db.js';
+import { query } from '../db.js';
 
-export function authenticate(req, res, next) {
+export async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'נדרשת התחברות' });
@@ -11,9 +11,9 @@ export function authenticate(req, res, next) {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Verify user still exists in DB (DB resets on redeploy)
-    const user = db.prepare('SELECT id FROM users WHERE id = ?').get(decoded.id);
-    if (!user) {
+    // Verify user still exists in DB
+    const result = await query('SELECT id FROM users WHERE id = $1', [decoded.id]);
+    if (result.rows.length === 0) {
       return res.status(401).json({ error: 'משתמש לא נמצא, יש להירשם מחדש' });
     }
 

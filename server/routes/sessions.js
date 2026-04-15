@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import db from '../db.js';
+import { query } from '../db.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = Router();
@@ -8,20 +8,25 @@ const router = Router();
 router.use(authenticate);
 
 // GET /api/sessions - list user's sessions
-router.get('/', (req, res) => {
-  const sessions = db.prepare(`
-    SELECT s.*,
-      (SELECT COUNT(*) FROM messages WHERE session_id = s.id AND role != 'system') as message_count
-    FROM sessions s
-    WHERE s.user_id = ?
-    ORDER BY s.updated_at DESC
-  `).all(req.user.id);
-
-  res.json(sessions);
+router.get('/', async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT s.*,
+        (SELECT COUNT(*) FROM messages WHERE session_id = s.id AND role <> 'system') AS message_count
+       FROM sessions s
+       WHERE s.user_id = $1
+       ORDER BY s.updated_at DESC`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('List sessions error:', err.message);
+    res.status(500).json({ error: 'שגיאה בטעינת הסשנים' });
+  }
 });
 
 // POST /api/sessions - create new session
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { title, type } = req.body;
 
   if (!title || !type) {
@@ -34,12 +39,11 @@ router.post('/', (req, res) => {
 
   try {
     console.log('Creating session:', { userId: req.user.id, title, type });
-    const result = db.prepare(
-      'INSERT INTO sessions (user_id, title, type) VALUES (?, ?, ?)'
-    ).run(req.user.id, title, type);
-
-    const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(result.lastInsertRowid);
-    res.status(201).json(session);
+    const result = await query(
+      'INSERT INTO sessions (user_id, title, type) VALUES ($1, $2, $3) RETURNING *',
+      [req.user.id, title, type]
+    );
+    res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Session creation error:', err.message);
     res.status(500).json({ error: 'שגיאה ביצירת סשן: ' + err.message });
@@ -47,64 +51,81 @@ router.post('/', (req, res) => {
 });
 
 // GET /api/sessions/:id - get session with messages
-router.get('/:id', (req, res) => {
-  const session = db.prepare(
-    'SELECT * FROM sessions WHERE id = ? AND user_id = ?'
-  ).get(req.params.id, req.user.id);
+router.get('/:id', async (req, res) => {
+  try {
+    const sessionResult = await query(
+      'SELECT * FROM sessions WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    const session = sessionResult.rows[0];
 
-  if (!session) {
-    return res.status(404).json({ error: 'סשן לא נמצא' });
+    if (!session) {
+      return res.status(404).json({ error: 'סשן לא נמצא' });
+    }
+
+    const messagesResult = await query(
+      'SELECT id, role, content, created_at FROM messages WHERE session_id = $1 ORDER BY created_at ASC, id ASC',
+      [session.id]
+    );
+
+    res.json({ ...session, messages: messagesResult.rows });
+  } catch (err) {
+    console.error('Get session error:', err.message);
+    res.status(500).json({ error: 'שגיאה בטעינת הסשן' });
   }
-
-  const messages = db.prepare(
-    'SELECT id, role, content, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC'
-  ).all(session.id);
-
-  res.json({ ...session, messages });
 });
 
 // PATCH /api/sessions/:id - update session (e.g., mark as completed)
-router.patch('/:id', (req, res) => {
-  const session = db.prepare(
-    'SELECT * FROM sessions WHERE id = ? AND user_id = ?'
-  ).get(req.params.id, req.user.id);
+router.patch('/:id', async (req, res) => {
+  try {
+    const sessionResult = await query(
+      'SELECT * FROM sessions WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    const session = sessionResult.rows[0];
 
-  if (!session) {
-    return res.status(404).json({ error: 'סשן לא נמצא' });
+    if (!session) {
+      return res.status(404).json({ error: 'סשן לא נמצא' });
+    }
+
+    const { status, title, story_text } = req.body;
+
+    if (status && !['active', 'completed'].includes(status)) {
+      return res.status(400).json({ error: 'סטטוס לא תקין' });
+    }
+
+    const updates = [];
+    const values = [];
+    let idx = 1;
+
+    if (status) {
+      updates.push(`status = $${idx++}`);
+      values.push(status);
+    }
+    if (title) {
+      updates.push(`title = $${idx++}`);
+      values.push(title);
+    }
+    if (story_text !== undefined) {
+      updates.push(`story_text = $${idx++}`);
+      values.push(story_text);
+    }
+
+    if (updates.length > 0) {
+      updates.push(`updated_at = NOW()`);
+      values.push(req.params.id, req.user.id);
+      await query(
+        `UPDATE sessions SET ${updates.join(', ')} WHERE id = $${idx++} AND user_id = $${idx++}`,
+        values
+      );
+    }
+
+    const updated = await query('SELECT * FROM sessions WHERE id = $1', [req.params.id]);
+    res.json(updated.rows[0]);
+  } catch (err) {
+    console.error('Update session error:', err.message);
+    res.status(500).json({ error: 'שגיאה בעדכון הסשן' });
   }
-
-  const { status, title, story_text } = req.body;
-
-  if (status && !['active', 'completed'].includes(status)) {
-    return res.status(400).json({ error: 'סטטוס לא תקין' });
-  }
-
-  const updates = [];
-  const values = [];
-
-  if (status) {
-    updates.push('status = ?');
-    values.push(status);
-  }
-  if (title) {
-    updates.push('title = ?');
-    values.push(title);
-  }
-  if (story_text !== undefined) {
-    updates.push('story_text = ?');
-    values.push(story_text);
-  }
-
-  if (updates.length > 0) {
-    updates.push('updated_at = CURRENT_TIMESTAMP');
-    values.push(req.params.id, req.user.id);
-    db.prepare(
-      `UPDATE sessions SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`
-    ).run(...values);
-  }
-
-  const updated = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id);
-  res.json(updated);
 });
 
 export default router;

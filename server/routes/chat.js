@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import db from '../db.js';
+import { query } from '../db.js';
 import { authenticate } from '../middleware/auth.js';
 import { SYSTEM_PROMPT } from '../systemPrompt.js';
 
@@ -52,17 +52,19 @@ function trimHistory(history, maxMessages = 20, keepFirst = 4) {
 router.post('/', async (req, res) => {
   const { sessionId, message } = req.body;
   if (!sessionId || !message) return res.status(400).json({ error: 'נדרשים מזהה סשן והודעה' });
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, req.user.id);
-  if (!session) return res.status(404).json({ error: 'סשן לא נמצא' });
-  if (session.status === 'completed') return res.status(400).json({ error: 'הסשן כבר הסתיים' });
-  db.prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)').run(sessionId, 'user', message);
-  const history = db.prepare('SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC').all(sessionId);
-  const trimmed = trimHistory(history);
-  const openaiMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...trimmed.map(m => ({ role: m.role, content: m.content }))];
   try {
+    const sessionRes = await query('SELECT * FROM sessions WHERE id = $1 AND user_id = $2', [sessionId, req.user.id]);
+    const session = sessionRes.rows[0];
+    if (!session) return res.status(404).json({ error: 'סשן לא נמצא' });
+    if (session.status === 'completed') return res.status(400).json({ error: 'הסשן כבר הסתיים' });
+    await query('INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'user', message]);
+    const historyRes = await query('SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC, id ASC', [sessionId]);
+    const history = historyRes.rows;
+    const trimmed = trimHistory(history);
+    const openaiMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...trimmed.map(m => ({ role: m.role, content: m.content }))];
     const assistantMessage = await callAI(openaiMessages);
-    db.prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)').run(sessionId, 'assistant', assistantMessage);
-    db.prepare('UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(sessionId);
+    await query('INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'assistant', assistantMessage]);
+    await query('UPDATE sessions SET updated_at = NOW() WHERE id = $1', [sessionId]);
     res.json({ message: assistantMessage });
   } catch (err) {
     console.error('Chat error:', err.message);
@@ -73,9 +75,11 @@ router.post('/', async (req, res) => {
 router.post('/finish', async (req, res) => {
   const { sessionId } = req.body;
   if (!sessionId) return res.status(400).json({ error: 'נדרש מזהה סשן' });
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, req.user.id);
+  const sessionRes = await query('SELECT * FROM sessions WHERE id = $1 AND user_id = $2', [sessionId, req.user.id]);
+  const session = sessionRes.rows[0];
   if (!session) return res.status(404).json({ error: 'סשן לא נמצא' });
-  const history = db.prepare('SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC').all(sessionId);
+  const historyRes = await query('SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC, id ASC', [sessionId]);
+  const history = historyRes.rows;
 
   // פרומפט משוב לפי שיטת "שני כוכבים ומשאלה" בהתאם למחוון ראמ"ה לכיתות ג'-ו'
   const feedbackPrompt = `סיימת לכתוב! תפקידך לתת משוב עידודי לילד בכיתות ג'-ו' בשיטת "שני כוכבים ומשאלה".
@@ -99,9 +103,9 @@ router.post('/finish', async (req, res) => {
 
   try {
     const feedbackMessage = await callAI(openaiMessages, 600);
-    db.prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)').run(sessionId, 'user', 'סיימתי לכתוב! אנא תן לי משוב מסכם.');
-    db.prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)').run(sessionId, 'assistant', feedbackMessage);
-    db.prepare('UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run('completed', sessionId);
+    await query('INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'user', 'סיימתי לכתוב! אנא תן לי משוב מסכם.']);
+    await query('INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'assistant', feedbackMessage]);
+    await query('UPDATE sessions SET status = $1, updated_at = NOW() WHERE id = $2', ['completed', sessionId]);
     res.json({ message: feedbackMessage });
   } catch (err) {
     console.error('Finish error:', err.message);
@@ -112,9 +116,11 @@ router.post('/finish', async (req, res) => {
 router.post('/illustrate', async (req, res) => {
   const { sessionId } = req.body;
   if (!sessionId) return res.status(400).json({ error: 'נדרש מזהה סשן' });
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, req.user.id);
+  const sessionRes = await query('SELECT * FROM sessions WHERE id = $1 AND user_id = $2', [sessionId, req.user.id]);
+  const session = sessionRes.rows[0];
   if (!session) return res.status(404).json({ error: 'סשן לא נמצא' });
-  const history = db.prepare('SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC').all(sessionId);
+  const historyRes = await query('SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC, id ASC', [sessionId]);
+  const history = historyRes.rows;
   try {
     // כל הטקסט של המשתמש – כולל שלב המסגרת (לחילוץ תיאור הדמויות)
     const allUserContent = history.filter(m => m.role === 'user').map(m => m.content).join('\n');
@@ -287,9 +293,9 @@ Rules:
 
     const assistantMessage = `הנה איור לסיפור שלך! 🎨\n![איור הסיפור](${dataUrl})`;
 
-    db.prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)').run(sessionId, 'user', 'צייר לי את הסיפור!');
-    db.prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)').run(sessionId, 'assistant', assistantMessage);
-    db.prepare('UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(sessionId);
+    await query('INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'user', 'צייר לי את הסיפור!']);
+    await query('INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'assistant', assistantMessage]);
+    await query('UPDATE sessions SET updated_at = NOW() WHERE id = $1', [sessionId]);
     res.json({ message: assistantMessage });
   } catch (err) {
     console.error('Illustrate error:', err.message);
