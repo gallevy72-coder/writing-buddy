@@ -173,7 +173,7 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
     try {
       const seed = Math.floor(Math.random() * 999999);
       const encodedPrompt = encodeURIComponent(fullImagePrompt.slice(0, 400));
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=512&seed=${seed}&model=flux&nologo=true`;
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=512&seed=${seed}&model=flux&nologo=true&enhance=true&nofeed=true`;
       console.log('[Illustrate] Trying Pollinations server-side, seed:', seed);
 
       const controller = new AbortController();
