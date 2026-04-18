@@ -172,7 +172,7 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
     // ─── ניסיון 1: Pollinations.ai – השרת מוריד עם headers של דפדפן ────────────
     try {
       const seed = Math.floor(Math.random() * 999999);
-      const encodedPrompt = encodeURIComponent(fullImagePrompt.slice(0, 400));
+      const encodedPrompt = encodeURIComponent(fullImagePrompt.slice(0, 800));
       const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=512&seed=${seed}&model=flux&nologo=true&enhance=true&nofeed=true`;
       console.log('[Illustrate] Trying Pollinations server-side, seed:', seed);
 
