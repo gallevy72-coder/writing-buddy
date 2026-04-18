@@ -175,6 +175,7 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
       const encodedPrompt = encodeURIComponent(fullImagePrompt.slice(0, 800));
       const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=512&seed=${seed}&model=flux&nologo=true&enhance=true&nofeed=true`;
       console.log('[Illustrate] Trying Pollinations server-side, seed:', seed);
+      console.log('[Illustrate] Pollinations URL:', pollinationsUrl);
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 50000);
