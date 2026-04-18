@@ -162,7 +162,6 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
     // SDXL רגיש לסדר — הדמות חייבת לבוא לפני הסצנה לעקביות מרבית
     const stylePrefix  = 'Pixar animation style, Disney Pixar 3D render, highly detailed smooth 3D, cinematic soft lighting, subsurface scattering';
     const stylePostfix = 'expressive cute character, vibrant cheerful colors, children animated movie, octane render, 8k, same character design throughout';
-    const negativePrompt = 'different character, character swap, multiple styles, flat, 2D, sketch, painting, ugly, deformed, poorly drawn, bad anatomy, blurry, low quality, dark, scary, adult, text, watermark, logo';
     const fullImagePrompt = `${stylePrefix}, ${characterAnchor}, ${sceneDesc}, ${stylePostfix}`;
 
     console.log('[Illustrate] full prompt:', fullImagePrompt);
@@ -208,9 +207,7 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
     if (!dataUrl && HF_KEY) {
       // נסה כמה מודלים בסדר עדיפות — הראשון שעובד ינצח
       const hfModels = [
-        'stabilityai/stable-diffusion-xl-base-1.0',
-        'runwayml/stable-diffusion-v1-5',
-        'Lykon/dreamshaper-8',
+        'black-forest-labs/FLUX.1-schnell',
       ];
       for (const model of hfModels) {
         if (dataUrl) break;
@@ -229,9 +226,8 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
               body: JSON.stringify({
                 inputs: fullImagePrompt.slice(0, 400),
                 parameters: {
-                  num_inference_steps: 30,
-                  guidance_scale: 8.0,
-                  negative_prompt: negativePrompt,
+                  num_inference_steps: 4,
+                  guidance_scale: 0.0,
                   width: 768,
                   height: 512,
                 },
