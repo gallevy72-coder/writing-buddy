@@ -168,96 +168,58 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
 
     let dataUrl = null;
 
-    // ─── ניסיון 1: Pollinations.ai – השרת מוריד עם headers של דפדפן ────────────
-    try {
-      const seed = Math.floor(Math.random() * 999999);
-      const encodedPrompt = encodeURIComponent(fullImagePrompt.slice(0, 800));
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=512&seed=${seed}&model=flux&nologo=true&enhance=true&nofeed=true`;
-      console.log('[Illustrate] Trying Pollinations server-side, seed:', seed);
-      console.log('[Illustrate] Pollinations URL:', pollinationsUrl);
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 50000);
-      const imgRes = await fetch(pollinationsUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Referer': 'https://pollinations.ai/',
-        },
-      });
-      clearTimeout(timer);
-
-      if (imgRes.ok) {
-        const ct = imgRes.headers.get('content-type') || 'image/jpeg';
-        const buf = await imgRes.arrayBuffer();
-        const b64 = Buffer.from(buf).toString('base64');
-        dataUrl = `data:${ct};base64,${b64}`;
-        console.log('[Illustrate] Pollinations OK! size:', Math.round(b64.length / 1024), 'KB');
-      } else {
-        console.warn('[Illustrate] Pollinations HTTP', imgRes.status);
-      }
-    } catch (e) {
-      console.warn('[Illustrate] Pollinations error:', e.message);
-    }
-
-    // ─── ניסיון 2: HuggingFace SDXL – איורים אמיתיים עם מפתח שכבר קיים ──────────
+    // ─── ניסיון 1: HuggingFace FLUX.1-schnell ───────────────────────────────────
     const HF_KEY = process.env.HF_API_KEY;
-    if (!dataUrl && HF_KEY) {
-      // נסה כמה מודלים בסדר עדיפות — הראשון שעובד ינצח
-      const hfModels = [
-        'black-forest-labs/FLUX.1-schnell',
-      ];
-      for (const model of hfModels) {
-        if (dataUrl) break;
-        try {
-          console.log('[Illustrate] Trying HuggingFace:', model);
-          const hfController = new AbortController();
-          const hfTimer = setTimeout(() => hfController.abort(), 60000);
-          const hfRes = await fetch(
-            `https://router.huggingface.co/hf-inference/models/${model}`,
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${HF_KEY}`,
-                'Content-Type': 'application/json',
+    if (HF_KEY) {
+      const model = 'black-forest-labs/FLUX.1-schnell';
+      try {
+        console.log('[Illustrate] Trying HuggingFace:', model);
+        const hfController = new AbortController();
+        const hfTimer = setTimeout(() => hfController.abort(), 60000);
+        const hfRes = await fetch(
+          `https://router.huggingface.co/hf-inference/models/${model}`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${HF_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              inputs: fullImagePrompt.slice(0, 400),
+              parameters: {
+                num_inference_steps: 4,
+                guidance_scale: 0.0,
+                width: 768,
+                height: 512,
               },
-              body: JSON.stringify({
-                inputs: fullImagePrompt.slice(0, 400),
-                parameters: {
-                  num_inference_steps: 4,
-                  guidance_scale: 0.0,
-                  width: 768,
-                  height: 512,
-                },
-              }),
-              signal: hfController.signal,
-            }
-          );
-          clearTimeout(hfTimer);
-          if (hfRes.ok) {
-            const ct = hfRes.headers.get('content-type') || 'image/jpeg';
-            if (ct.startsWith('image/')) {
-              const buf = await hfRes.arrayBuffer();
-              const b64 = Buffer.from(buf).toString('base64');
-              dataUrl = `data:${ct};base64,${b64}`;
-              console.log('[Illustrate] HuggingFace OK! model:', model, 'size:', Math.round(b64.length / 1024), 'KB');
-            } else {
-              const txt = await hfRes.text();
-              console.warn('[Illustrate] HuggingFace non-image response:', txt.slice(0, 150));
-            }
-          } else {
-            const herr = await hfRes.text();
-            console.warn('[Illustrate] HuggingFace', model, 'failed:', hfRes.status, herr.slice(0, 100));
+            }),
+            signal: hfController.signal,
           }
-        } catch (e) {
-          console.warn('[Illustrate] HuggingFace', model, 'error:', e.message);
+        );
+        clearTimeout(hfTimer);
+        if (hfRes.ok) {
+          const ct = hfRes.headers.get('content-type') || 'image/jpeg';
+          if (ct.startsWith('image/')) {
+            const buf = await hfRes.arrayBuffer();
+            const b64 = Buffer.from(buf).toString('base64');
+            dataUrl = `data:${ct};base64,${b64}`;
+            console.log('[Illustrate] HuggingFace OK! size:', Math.round(b64.length / 1024), 'KB');
+          } else {
+            const txt = await hfRes.text();
+            console.warn('[Illustrate] HuggingFace non-image response:', txt.slice(0, 150));
+          }
+        } else {
+          const herr = await hfRes.text();
+          console.warn('[Illustrate] HuggingFace failed:', hfRes.status, herr.slice(0, 100));
         }
+      } catch (e) {
+        console.warn('[Illustrate] HuggingFace error:', e.message);
       }
+    } else {
+      console.warn('[Illustrate] HF_API_KEY not set — skipping HuggingFace');
     }
 
-    // ─── ניסיון 3: SVG מפורט דרך Groq (fallback אחרון) ──────────────────────────
+    // ─── ניסיון 2: SVG מפורט דרך Groq (fallback אחרון) ──────────────────────────
     if (!dataUrl) {
       console.log('[Illustrate] Falling back to detailed SVG...');
       const svgRaw = await callAI([

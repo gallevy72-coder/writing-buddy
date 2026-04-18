@@ -55,12 +55,12 @@ The "my story" popup text comes from filtering user messages: `role === 'user'` 
 
 `server/routes/chat.js` `trimHistory()` keeps the first 4 messages (framework Q&A — needed for character consistency) plus the last 20, and strips large `data:` image URLs from older messages. This exists specifically to stay under Groq free-tier's 12k TPM limit on long sessions. If you increase context, re-check Groq tier limits.
 
-### Illustration pipeline (3-tier fallback)
+### Illustration pipeline (2-tier fallback)
 
 `POST /api/chat/illustrate` in `server/routes/chat.js`:
 
 1. **Prompt extraction** — a Groq call with a strict English system prompt extracts two fixed lines: LINE 1 = character (stable across all illustrations in the session), LINE 2 = current scene. The whole point of the two-line split is character consistency across multiple illustrations — don't merge them.
-2. **Image generation**, in order, first success wins: Pollinations.ai (needs browser-like headers or it returns HTML), HuggingFace SDXL (tries 3 models if `HF_API_KEY` is set), then a Groq-generated SVG fallback.
+2. **Image generation**, in order, first success wins: HuggingFace `black-forest-labs/FLUX.1-schnell` via `router.huggingface.co/hf-inference` (requires `HF_API_KEY`; FLUX-schnell is a gated model, so the token's HF account must accept the license), then a Groq-generated SVG fallback. Pollinations was removed on 2026-04-18 after their anonymous tier gated `enhance=true` + `model=flux` behind auth.
 3. Result is base64-embedded into the assistant message as `![איור הסיפור](data:image/...)`. These large data URLs are what `trimHistory` strips from history.
 
 ### Backend stack
@@ -69,4 +69,4 @@ Express with ES modules (`"type": "module"`). JWT in `Authorization: Bearer <tok
 
 ### Frontend stack
 
-React 18 + Vite + React Router 7 + Tailwind. Auth token lives in `localStorage`; `App.jsx` holds it in state and passes it down. The `buddy-*` Tailwind color palette (`client/tailwind.config.js`) and `dir="rtl"` on popup containers are the visual conventions — preserve them. Axios calls include a 90-second timeout specifically because Pollinations can take ~50s to return an image.
+React 18 + Vite + React Router 7 + Tailwind. Auth token lives in `localStorage`; `App.jsx` holds it in state and passes it down. The `buddy-*` Tailwind color palette (`client/tailwind.config.js`) and `dir="rtl"` on popup containers are the visual conventions — preserve them. Axios calls include a 90-second timeout because illustration generation (HF FLUX.1-schnell) can take tens of seconds.
