@@ -39,6 +39,11 @@ function StoryImage({ src, alt }) {
   );
 }
 
+function stripAsterisks(text) {
+  // הסר ** (מודגש) ו-* (נטוי) — השאר את הטקסט בלי כוכביות
+  return text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1');
+}
+
 function renderContent(content) {
   // Parse markdown images: ![alt](url) — supports long data: URLs and https
   const imgRegex = /!\[([^\]]*)\]\((data:[^)]+|https?:\/\/[^\s)]+)\)/g;
@@ -48,7 +53,7 @@ function renderContent(content) {
 
   while ((match = imgRegex.exec(content)) !== null) {
     if (match.index > lastIndex) {
-      result.push(content.slice(lastIndex, match.index));
+      result.push(stripAsterisks(content.slice(lastIndex, match.index)));
     }
     result.push(
       <StoryImage key={match.index} src={match[2]} alt={match[1]} />
@@ -57,7 +62,7 @@ function renderContent(content) {
   }
 
   if (lastIndex < content.length) {
-    result.push(content.slice(lastIndex));
+    result.push(stripAsterisks(content.slice(lastIndex)));
   }
 
   return result;

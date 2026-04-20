@@ -201,7 +201,7 @@ export default function WritingSession({ user, token, onLogout }) {
       setError('שגיאה. נסו שוב.');
       setMessages(prev => prev.filter(m => m.id !== tempMsg.id));
       setWritingStartIndex(null); // חזרה לשלב תכנון
-    } finally { setLoading(false); }
+    } finally { setLoading(false); inputRef.current?.focus(); }
   };
 
   // =============================================
@@ -226,7 +226,7 @@ export default function WritingSession({ user, token, onLogout }) {
         setError('שגיאה ביצירת האיור. נסו שוב.');
         setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id));
         setToolUses(prev => ({ ...prev, illustrate: prev.illustrate - 1 }));
-      } finally { setLoading(false); setIllustrating(false); }
+      } finally { setLoading(false); setIllustrating(false); inputRef.current?.focus(); }
       return;
     }
 
@@ -241,7 +241,7 @@ export default function WritingSession({ user, token, onLogout }) {
       setError(err.response?.data?.error || 'שגיאה בשליחת ההודעה. נסו שוב.');
       setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id));
       setToolUses(prev => ({ ...prev, [tool.key]: prev[tool.key] - 1 }));
-    } finally { setLoading(false); }
+    } finally { setLoading(false); inputRef.current?.focus(); }
   };
 
   // =============================================
