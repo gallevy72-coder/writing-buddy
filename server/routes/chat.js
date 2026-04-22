@@ -3,6 +3,18 @@ import { query } from '../db.js';
 import { authenticate } from '../middleware/auth.js';
 import { SYSTEM_PROMPT } from '../systemPrompt.js';
 
+// מראת צד-שרת של TOOL_MESSAGES מהלקוח (client/src/components/WritingSession.jsx:11,18-26).
+// משמש רק לסינון "לחיצות כלים" מחילוץ תיאור הסצנה באיור — המקור הקנוני נשאר בלקוח.
+const TOOL_MESSAGES = new Set([
+  'אני צריך רעיון להמשך הסיפור. תן לי רעיון יצירתי שמתאים למה שכתבתי עד עכשיו.',
+  "עזור לי לנסח מחדש את מה שכתבתי. תציע ניסוח משופר שמתאים לכיתה ד'.",
+  'בדוק את מה שכתבתי ותקן שגיאות כתיב, פיסוק ודקדוק.',
+  'מה דעתך על מה שכתבתי עד עכשיו? תן לי משוב קצר - מה טוב ומה אפשר לשפר.',
+  'צייר לי את הסיפור!',
+  'סיימתי לכתוב! אנא תן לי משוב מסכם.',
+  'סיימתי לתכנן! אני מוכן/ה להתחיל לכתוב את הסיפור.',
+]);
+
 const router = Router();
 router.use(authenticate);
 
@@ -124,8 +136,17 @@ router.post('/illustrate', async (req, res) => {
   try {
     // כל הטקסט של המשתמש – כולל שלב המסגרת (לחילוץ תיאור הדמויות)
     const allUserContent = history.filter(m => m.role === 'user').map(m => m.content).join('\n');
-    // 4 הודעות אחרונות של המשתמש – לתיאור הסצנה הנוכחית
-    const recentScene = history.filter(m => m.role === 'user').slice(-4).map(m => m.content).join(' ');
+    // הודעות הסיפור בלבד – בלי לחיצות כלים ובלי הודעת המעבר, כדי שהסצנה לא תזדהם
+    // מ"צייר לי את הסיפור!" / KICKOFF_MESSAGE שתופסות מקום יקר בחלון ה-400 תווים.
+    const storyUserMsgs = history.filter(m => m.role === 'user' && !TOOL_MESSAGES.has(m.content));
+    const recentScene = storyUserMsgs.slice(-4).map(m => m.content).join(' ');
+    // 2 התגובות האחרונות של המאמן – לעתים קרובות הן מתארות את הסצנה בצורה עשירה יותר מהילד.
+    // מסירים data: URLs של איורים קודמים באותה רגקס כמו ב-trimHistory.
+    const recentCoach = history
+      .filter(m => m.role === 'assistant')
+      .slice(-2)
+      .map(m => m.content.replace(/!\[([^\]]*)\]\(data:[^)]{50,}\)/g, '[🎨 איור]'))
+      .join('\n');
 
     // ─── שלב 1: חילוץ תיאור דמות קבוע + סצנה נוכחית בשני שורות נפרדות ──────────
     // זה הסוד לעקביות: SDXL מקבל תיאור דמות זהה בכל ציור, רק הסצנה משתנה.
@@ -134,25 +155,25 @@ router.post('/illustrate', async (req, res) => {
         role: 'system',
         content: `You extract illustration data from a Hebrew children's story. Output EXACTLY 2 lines, English only, no Hebrew, no quotes, no explanations:
 LINE 1 – CHARACTER (fixed physical traits that never change): [age]-year-old [boy/girl], [hair color] [hair length/style] hair, [eye color] eyes, [skin tone] skin, wearing [specific clothing with colors]
-LINE 2 – SCENE (current action and setting, no appearance): [exactly what the character is doing right now], [specific location/setting], [key objects in the scene]
+LINE 2 – SCENE (current action and mood, no appearance): [exactly what the character is doing right now], [emotion visible on character's face], [specific location/setting], [time of day and lighting], [overall mood/atmosphere], [key objects in the scene]
 
 Example output:
 8-year-old girl, short blonde curly hair, blue eyes, fair skin, wearing pink dress and white sneakers
-running through a sunny park, searching behind a big oak tree, colorful flowers all around`
+running through a sunny park, excited wide smile, beneath a big oak tree at golden hour, warm playful mood, colorful wildflowers and a red kite overhead`
       },
       {
         role: 'user',
-        content: `Full story context (Hebrew – use for character appearance):\n"${allUserContent.slice(0, 800)}"\n\nCurrent scene (Hebrew – use for LINE 2 only):\n"${recentScene.slice(0, 400)}"\n\nOutput exactly 2 lines:`
+        content: `Full story context (Hebrew – use for character appearance):\n"${allUserContent.slice(0, 800)}"\n\nCurrent scene from the child (Hebrew – use for LINE 2):\n"${recentScene.slice(0, 400)}"\n\nCoach's recent narration (Hebrew – additional scene context for LINE 2):\n"${recentCoach.slice(0, 600)}"\n\nOutput exactly 2 lines:`
       }
     ];
 
-    const rawPrompt = await callAI(promptMessages, 100);
+    const rawPrompt = await callAI(promptMessages, 200);
     const lines = rawPrompt.trim().split('\n')
       .map(l => l.replace(/^(LINE\s*\d\s*[-–:]|CHARACTER\s*[-–:]|SCENE\s*[-–:]|\d\s*[.)]\s*)/i, '').trim())
       .filter(l => l.length > 5);
 
     const characterAnchor = (lines[0] || '').replace(/["""'']/g, '').slice(0, 150);
-    const sceneDesc      = (lines[1] || lines[0] || '').replace(/["""'']/g, '').slice(0, 200);
+    const sceneDesc      = (lines[1] || lines[0] || '').replace(/["""'']/g, '').slice(0, 300);
 
     console.log('[Illustrate] character:', characterAnchor);
     console.log('[Illustrate] scene:', sceneDesc);
