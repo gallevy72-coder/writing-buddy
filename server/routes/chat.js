@@ -147,70 +147,58 @@ Rules: use ONLY details the author explicitly wrote. If a detail is missing, omi
     };
 
     if (!characterAnchors) {
-      // ראשון איור — חלץ מכל הסיפור
+      // איור ראשון — חלץ מכל הסיפור
       characterAnchors = await extractAnchors(allUserContent);
       await query('UPDATE sessions SET character_anchors = $1 WHERE id = $2', [characterAnchors, sessionId]);
       console.log('[Illustrate] Anchors saved (first time):', characterAnchors);
     } else {
-      // בדוק אם יש דמויות חדשות בכתיבה האחרונה שאינן בתיאורים הקיימים
-      const newCharsPrompt = await callAI([
-        {
-          role: 'system',
-          content: `You check if a recent Hebrew story excerpt introduces NEW named characters not already in the existing character list.
-If there are new characters with physical descriptions: output their lines in this format (English only):
-CHARACTER "[name]": [age]-year-old [boy/girl], [hair color+style] hair, [eye color] eyes, wearing [clothing]
-If no new characters with descriptions: output exactly the word NONE.`
-        },
-        {
-          role: 'user',
-          content: `Existing characters:\n${characterAnchors}\n\nRecent story (Hebrew):\n"${recentScene.slice(0, 800)}"\n\nNew characters?`
-        }
-      ], 150);
-      const newChars = newCharsPrompt.trim().replace(/["""'']/g, '');
-      if (newChars && newChars !== 'NONE' && newChars.includes('CHARACTER')) {
-        characterAnchors = characterAnchors + '\n' + newChars;
-        await query('UPDATE sessions SET character_anchors = $1 WHERE id = $2', [characterAnchors, sessionId]);
-        console.log('[Illustrate] Anchors updated with new characters:', newChars);
-      } else {
-        console.log('[Illustrate] Using saved anchors:', characterAnchors);
-      }
+      console.log('[Illustrate] Using saved anchors:', characterAnchors);
     }
 
-    // ─── שלב 2: יצירת פרומפט DALL-E משולב — דמות + פעולה במשפט אחד ─────────────
-    // זוהי הטכניקה הכי אפקטיבית ל-DALL-E 3: לשלב תיאור מראה עם פעולה
-    // במקום שני קטעים נפרדים — כל דמות מתוארת עם הפעולה שלה באותו המשפט
-    const mergePrompt = [
+    // ─── שלב 2: קריאה אחת — בדיקת דמויות חדשות + פרומפט משולב ─────────────────
+    // הכל בקריאה אחת לחיסכון ב-tokens ומניעת rate limit
+    const mergedPrompt = (await callAI([
       {
         role: 'system',
-        content: `You write a DALL-E 3 illustration prompt for a children's story scene.
+        content: `You write a DALL-E 3 illustration prompt for a Hebrew children's story.
 
-Your output must be ONE English paragraph (100-150 words) that:
-1. Describes the EXACT scene from the latest story text (location, time of day, objects, atmosphere)
-2. For EACH character present in this scene: writes ONE sentence that combines their EXACT appearance with their EXACT action — like this:
-   "[Name], a 9-year-old girl with long curly red hair, green eyes, wearing a blue dress and white sneakers, runs breathlessly toward the old wooden bridge"
-   NOT: "A girl runs to the bridge" (too vague)
-   NOT: "The girl has red hair. She is running." (separated — DALL-E ignores the connection)
+TASK A — Check for new characters:
+If the latest story text introduces a NEW named character (not in the saved list) WITH physical description details, add them at the start of your output in this format:
+NEW_CHARACTER "[name]": [age]-year-old [boy/girl], [hair+style], [eyes], wearing [clothing]
+If no new characters with descriptions: skip this part entirely.
 
-Rules:
-- Use the character's EXACT saved appearance — never change a single detail
-- The action must come directly from the latest story text — never invent
-- Every character who appears in the scene must be in the prompt with full appearance+action
-- Environment details must match the story text exactly
-- English only, vivid and specific`
+TASK B — Write the illustration prompt:
+Output ONE English paragraph (100-150 words) after the optional NEW_CHARACTER lines.
+For EACH character in the scene, write ONE sentence combining their EXACT appearance with their EXACT current action:
+  Example: "Lior, a 9-year-old girl with long blonde braided hair, brown eyes, wearing a yellow top and blue skirt, runs breathlessly toward an old wooden bridge over a rushing stream"
+  Wrong: "A girl runs to the bridge" — too vague
+  Wrong: "The girl has blonde hair. She runs." — DALL-E ignores separated descriptions
+
+Also describe: location, time of day, atmosphere, key objects — all from the latest text only.
+English only. Never invent details not in the text.`
       },
       {
         role: 'user',
-        content: `SAVED CHARACTER APPEARANCES (use exactly, do not change):\n${characterAnchors}\n\nLATEST STORY TEXT (what to illustrate):\n"${lastStoryMsg.slice(0, 700)}"\n\nRecent context:\n"${recentScene.slice(0, 500)}"\n\nWrite the merged DALL-E prompt paragraph:`
+        content: `SAVED CHARACTER APPEARANCES (fixed, do not change):\n${characterAnchors}\n\nLATEST STORY TEXT:\n"${lastStoryMsg.slice(0, 700)}"\n\nRecent context:\n"${recentScene.slice(0, 400)}"\n\nOutput:`
       }
-    ];
+    ], 300)).trim().replace(/["""'']/g, '');
 
-    const mergedPrompt = (await callAI(mergePrompt, 250)).trim().replace(/["""'']/g, '');
-    console.log('[Illustrate] Merged prompt:', mergedPrompt);
+    // שמור דמויות חדשות אם נמצאו
+    const newCharLines = mergedPrompt.split('\n').filter(l => l.startsWith('NEW_CHARACTER'));
+    if (newCharLines.length > 0) {
+      const updated = characterAnchors + '\n' + newCharLines.map(l => l.replace('NEW_CHARACTER', 'CHARACTER')).join('\n');
+      await query('UPDATE sessions SET character_anchors = $1 WHERE id = $2', [updated, sessionId]);
+      console.log('[Illustrate] Added new characters:', newCharLines);
+    }
+
+    // הסר שורות NEW_CHARACTER מהפרומפט הסופי
+    const cleanPrompt = mergedPrompt.split('\n').filter(l => !l.startsWith('NEW_CHARACTER')).join('\n').trim();
+    console.log('[Illustrate] Final prompt:', cleanPrompt);
 
     // ─── שלב 3: הרכבת הפרומפט הסופי ─────────────────────────────────────────────
     const fullImagePrompt = `Pixar / Disney 3D children's book illustration, cinematic soft lighting, vibrant cheerful colors, 8k quality.
 
-${mergedPrompt}
+${cleanPrompt}
 
 Art direction: same character design throughout, expressive faces, detailed background faithful to scene description.`;
 
@@ -327,7 +315,7 @@ Rules:
         },
         {
           role: 'user',
-          content: `Create a children's book illustration SVG for this scene: "${mergedPrompt.slice(0, 500)}". Include ALL characters. ONLY SVG code:`
+          content: `Create a children's book illustration SVG for this scene: "${cleanPrompt.slice(0, 500)}". Include ALL characters. ONLY SVG code:`
         }
       ], 4000);
       const svgMatch = svgRaw.match(/<svg[\s\S]*<\/svg>/i);
