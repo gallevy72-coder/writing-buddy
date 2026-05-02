@@ -162,60 +162,39 @@ Rules: use ONLY details the author explicitly wrote. If a detail is missing, omi
     };
 
     if (!characterAnchors) {
-      // איור ראשון — חלץ מכל הסיפור
       characterAnchors = await extractAnchors(allUserContent);
       await query('UPDATE sessions SET character_anchors = $1 WHERE id = $2', [characterAnchors, sessionId]);
-      console.log('[Illustrate] Anchors saved (first time):', characterAnchors);
+      console.log('[Illustrate] Anchors saved:', characterAnchors);
     } else {
       console.log('[Illustrate] Using saved anchors:', characterAnchors);
     }
 
-    // ─── שלב 2: קריאה אחת — בדיקת דמויות חדשות + פרומפט משולב ─────────────────
-    // הכל בקריאה אחת לחיסכון ב-tokens ומניעת rate limit
-    const mergedPrompt = (await callAI([
+    // ─── שלב 2: תרגום קצר של הסצנה בלבד (קריאה אחת, 80 tokens) ─────────────────
+    // זה הכל שצריך מ-Groq — רק לתרגם את הכתיבה האחרונה לאנגלית בקצרה.
+    // הפרומפט המלא נבנה ידנית ללא AI נוסף — מונע rate limit לחלוטין.
+    const sceneEn = (await callAI([
       {
         role: 'system',
-        content: `You write a DALL-E 3 illustration prompt for a Hebrew children's story.
-
-TASK A — Check for new characters:
-If the latest story text introduces a NEW named character (not in the saved list) WITH physical description details, add them at the start of your output in this format:
-NEW_CHARACTER "[name]": [age]-year-old [boy/girl], [hair+style], [eyes], wearing [clothing]
-If no new characters with descriptions: skip this part entirely.
-
-TASK B — Write the illustration prompt:
-Output ONE English paragraph (100-150 words) after the optional NEW_CHARACTER lines.
-For EACH character in the scene, write ONE sentence combining their EXACT appearance with their EXACT current action:
-  Example: "Lior, a 9-year-old girl with long blonde braided hair, brown eyes, wearing a yellow top and blue skirt, runs breathlessly toward an old wooden bridge over a rushing stream"
-  Wrong: "A girl runs to the bridge" — too vague
-  Wrong: "The girl has blonde hair. She runs." — DALL-E ignores separated descriptions
-
-Also describe: location, time of day, atmosphere, key objects — all from the latest text only.
-English only. Never invent details not in the text.`
+        content: 'Translate the following Hebrew children\'s story excerpt to English in 2-3 sentences. Describe only the action, location and objects — not character appearance. Output only the translation, nothing else.'
       },
-      {
-        role: 'user',
-        content: `SAVED CHARACTER APPEARANCES (fixed, do not change):\n${characterAnchors}\n\nLATEST STORY TEXT:\n"${lastStoryMsg.slice(0, 700)}"\n\nRecent context:\n"${recentScene.slice(0, 400)}"\n\nOutput:`
-      }
-    ], 300, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
+      { role: 'user', content: `"${lastStoryMsg.slice(0, 500)}"` }
+    ], 100, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
 
-    // שמור דמויות חדשות אם נמצאו
-    const newCharLines = mergedPrompt.split('\n').filter(l => l.startsWith('NEW_CHARACTER'));
-    if (newCharLines.length > 0) {
-      const updated = characterAnchors + '\n' + newCharLines.map(l => l.replace('NEW_CHARACTER', 'CHARACTER')).join('\n');
-      await query('UPDATE sessions SET character_anchors = $1 WHERE id = $2', [updated, sessionId]);
-      console.log('[Illustrate] Added new characters:', newCharLines);
-    }
+    console.log('[Illustrate] Scene (EN):', sceneEn);
 
-    // הסר שורות NEW_CHARACTER מהפרומפט הסופי
-    const cleanPrompt = mergedPrompt.split('\n').filter(l => !l.startsWith('NEW_CHARACTER')).join('\n').trim();
-    console.log('[Illustrate] Final prompt:', cleanPrompt);
-
-    // ─── שלב 3: הרכבת הפרומפט הסופי ─────────────────────────────────────────────
+    // ─── שלב 3: בניית פרומפט DALL-E ישירות — ללא קריאת AI נוספת ────────────────
     const fullImagePrompt = `Pixar / Disney 3D children's book illustration, cinematic soft lighting, vibrant cheerful colors, 8k quality.
 
-${cleanPrompt}
+SCENE TO ILLUSTRATE (from the story):
+${sceneEn}
 
-Art direction: same character design throughout, expressive faces, detailed background faithful to scene description.`;
+CHARACTER DESIGNS — render each character with EXACTLY these features, same in every illustration:
+${characterAnchors}
+
+RULES:
+- Show every character present in the scene with their exact saved appearance
+- Background and environment must match the scene description faithfully
+- Same character design throughout — do not alter face, hair, or clothing`;
 
     console.log('[Illustrate] full prompt:', fullImagePrompt);
 
@@ -330,7 +309,7 @@ Rules:
         },
         {
           role: 'user',
-          content: `Create a children's book illustration SVG for this scene: "${cleanPrompt.slice(0, 500)}". Include ALL characters. ONLY SVG code:`
+          content: `Create a children's book illustration SVG. Characters: "${characterAnchors.slice(0, 200)}". Scene: "${sceneEn.slice(0, 300)}". Include ALL characters. ONLY SVG code:`
         }
       ], 4000);
       const svgMatch = svgRaw.match(/<svg[\s\S]*<\/svg>/i);
