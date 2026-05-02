@@ -47,6 +47,7 @@ const hfRelated = Object.keys(process.env).filter(k => /hf|hugging/i.test(k));
 console.log(`[startup] HF_API_KEY: ${hfMask}`);
 console.log(`[startup] HF-related env keys found: ${hfRelated.join(', ') || '(none)'}`);
 console.log(`[startup] GROQ_API_KEY: ${process.env.GROQ_API_KEY ? 'set' : 'MISSING'}`);
+console.log(`[startup] OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? 'set' : 'MISSING'}`);
 
 initDb()
   .then(() => {

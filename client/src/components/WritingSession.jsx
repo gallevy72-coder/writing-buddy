@@ -83,7 +83,7 @@ export default function WritingSession({ user, token, onLogout }) {
 
   const api = axios.create({
     headers: { Authorization: `Bearer ${token}` },
-    timeout: 90000, // 90 שניות — מספיק ל-Pollinations שלוקח עד 50 שניות
+    timeout: 180000, // 3 דקות — מספיק גם להפעלה מחדש של Render (50+ שניות cold start)
   });
 
   useEffect(() => { loadSession(); }, [id]);
