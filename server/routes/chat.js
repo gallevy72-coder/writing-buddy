@@ -151,10 +151,17 @@ router.post('/illustrate', async (req, res) => {
       const res = await callAI([
         {
           role: 'system',
-          content: `Extract PERMANENT physical descriptions of every named character from this Hebrew story.
+          content: `Extract PERMANENT visual descriptions of every named character from this Hebrew children's story, for use in AI image generation.
+
 One line per character, English only:
-CHARACTER "[exact name as written]": [age]-year-old [boy/girl], [hair color+style] hair, [eye color] eyes, [skin tone], wearing [clothing with exact colors]
-Rules: use ONLY details the author explicitly wrote. If a detail is missing, omit it. Never invent.`
+CHARACTER "[name]": [age]-year-old [boy/girl], [very specific hair: color + length + style e.g. "long wavy auburn hair in a ponytail"], [eye color] eyes, [skin tone] skin, ALWAYS wearing [specific clothing: item + color + style e.g. "orange tank top, green shorts, barefoot"]
+
+Critical rules:
+- Use ONLY details the author explicitly wrote — never guess or invent
+- Be maximally specific: "wavy shoulder-length chestnut brown hair" not just "brown hair"
+- Clothing details are the strongest anchor for DALL-E consistency — include every detail mentioned
+- If appearance detail is missing, write "unspecified" so DALL-E doesn't invent wildly
+- These descriptions are permanently locked for the entire story`
         },
         { role: 'user', content: `Story (Hebrew):\n"${text.slice(0, 1500)}"\n\nOutput character lines:` }
       ], 300, 'llama-3.1-8b-instant');
@@ -169,32 +176,43 @@ Rules: use ONLY details the author explicitly wrote. If a detail is missing, omi
       console.log('[Illustrate] Using saved anchors:', characterAnchors);
     }
 
-    // ─── שלב 2: תרגום קצר של הסצנה בלבד (קריאה אחת, 80 tokens) ─────────────────
-    // זה הכל שצריך מ-Groq — רק לתרגם את הכתיבה האחרונה לאנגלית בקצרה.
-    // הפרומפט המלא נבנה ידנית ללא AI נוסף — מונע rate limit לחלוטין.
+    // ─── שלב 2: תרגום + השלמת הגיון סצנה (קריאה אחת, 150 tokens) ──────────────
     const sceneEn = (await callAI([
       {
         role: 'system',
-        content: 'Translate the following Hebrew children\'s story excerpt to English in 2-3 sentences. Describe only the action, location and objects — not character appearance. Output only the translation, nothing else.'
+        content: `You translate a Hebrew children's story excerpt to English AND enrich it with logical scene details.
+
+Output 3-4 sentences:
+1. Translate the action and location from the Hebrew text
+2. Add logical background details that make sense given the context:
+   - Time of day → appropriate lighting and sky
+   - Day of week (e.g. Saturday/Shabbat → beach full of families, children playing, umbrellas, vendors)
+   - Season → matching nature, clothing of background people
+   - Popular location → fill with appropriate crowd and atmosphere
+   - Weather implied → clear sky, waves, shade, etc.
+3. Mention specific objects from the text
+
+Output English only. Do NOT describe the main characters' appearance — only actions, location, background, atmosphere.`
       },
-      { role: 'user', content: `"${lastStoryMsg.slice(0, 500)}"` }
-    ], 100, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
+      { role: 'user', content: `Story context: "${recentScene.slice(0, 400)}"\nLatest paragraph: "${lastStoryMsg.slice(0, 500)}"` }
+    ], 150, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
 
     console.log('[Illustrate] Scene (EN):', sceneEn);
 
-    // ─── שלב 3: בניית פרומפט DALL-E ישירות — ללא קריאת AI נוספת ────────────────
+    // ─── שלב 3: בניית פרומפט DALL-E ─────────────────────────────────────────────
     const fullImagePrompt = `Pixar / Disney 3D children's book illustration, cinematic soft lighting, vibrant cheerful colors, 8k quality.
 
-SCENE TO ILLUSTRATE (from the story):
+SCENE (illustrate this exactly, including all background details):
 ${sceneEn}
 
-CHARACTER DESIGNS — render each character with EXACTLY these features, same in every illustration:
+MAIN CHARACTER DESIGNS — these are fixed and must not change between illustrations:
 ${characterAnchors}
 
-RULES:
-- Show every character present in the scene with their exact saved appearance
-- Background and environment must match the scene description faithfully
-- Same character design throughout — do not alter face, hair, or clothing`;
+MANDATORY RULES:
+- Every main character must match their EXACT design above: same face shape, same hair color and style, same clothing colors — no exceptions
+- The scene background must be rich and detailed: populate it logically (beach = families, umbrellas, waves; forest = trees, birds; etc.)
+- Show ALL main characters present in the scene
+- Do not invent or change any character appearance detail not listed above`;
 
     console.log('[Illustrate] full prompt:', fullImagePrompt);
 
