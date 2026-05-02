@@ -132,43 +132,35 @@ router.post('/illustrate', async (req, res) => {
     const lastStoryMsg = storyMessages[storyMessages.length - 1]?.content || '';
     const recentScene = storyMessages.slice(-3).map(m => m.content).join(' ');
 
-    // ─── שלב 1: חילוץ תיאור דמות קבוע + סצנה נוכחית ────────────────────────────
+    // ─── שלב 1: חילוץ תיאור סצנה מלא עם כל הדמויות ──────────────────────────────
     const promptMessages = [
       {
         role: 'system',
-        content: `You extract illustration data from a Hebrew children's story. Output EXACTLY 2 lines, English only, no Hebrew, no quotes, no explanations:
-LINE 1 – CHARACTER (fixed physical traits): [age]-year-old [boy/girl], [hair color] [hair length/style] hair, [eye color] eyes, [skin tone] skin, wearing [specific clothing with colors]
-LINE 2 – CURRENT SCENE (what is happening RIGHT NOW in the most recent writing): [exact action the character is doing right now], [specific location], [key objects or details from the latest text]
+        content: `You are an expert at creating DALL-E illustration prompts from Hebrew children's stories.
+Analyze the story and output ONE detailed English paragraph (80-150 words) describing exactly what to illustrate.
 
-IMPORTANT: LINE 2 must describe what happens in the LATEST paragraph, not a general summary.
-
-Example output:
-8-year-old girl, short blonde curly hair, blue eyes, fair skin, wearing pink dress and white sneakers
-running through a sunny park, searching behind a big oak tree, colorful flowers all around`
+Rules:
+- Base the scene on the MOST RECENT writing, not the whole story
+- Include EVERY character mentioned in the recent scene: for each one describe their age, gender, hair, eyes, skin tone, clothing, expression, and what they are doing RIGHT NOW
+- If two or more characters appear together — describe all of them and their interaction
+- Describe the setting: location, time of day, atmosphere, key objects
+- Be specific and faithful to the text — do not invent details not in the story
+- English only, no Hebrew, no labels, no explanations — just the scene description paragraph`
       },
       {
         role: 'user',
-        content: `Full story (Hebrew – use for character appearance):\n"${allUserContent.slice(0, 800)}"\n\nMost recent writing (Hebrew – use for LINE 2):\n"${lastStoryMsg.slice(0, 500)}"\n\nRecent context:\n"${recentScene.slice(0, 400)}"\n\nOutput exactly 2 lines:`
+        content: `Full story for character details (Hebrew):\n"${allUserContent.slice(0, 1000)}"\n\nMost recent writing to illustrate (Hebrew):\n"${lastStoryMsg.slice(0, 600)}"\n\nRecent context (Hebrew):\n"${recentScene.slice(0, 500)}"\n\nWrite the illustration description paragraph:`
       }
     ];
 
-    const rawPrompt = await callAI(promptMessages, 100);
-    const lines = rawPrompt.trim().split('\n')
-      .map(l => l.replace(/^(LINE\s*\d\s*[-–:]|CHARACTER\s*[-–:]|SCENE\s*[-–:]|\d\s*[.)]\s*)/i, '').trim())
-      .filter(l => l.length > 5);
+    const sceneDesc = (await callAI(promptMessages, 250)).trim().replace(/["""'']/g, '').slice(0, 800);
 
-    const characterAnchor = (lines[0] || '').replace(/["""'']/g, '').slice(0, 150);
-    const sceneDesc      = (lines[1] || lines[0] || '').replace(/["""'']/g, '').slice(0, 200);
-
-    console.log('[Illustrate] character:', characterAnchor);
-    console.log('[Illustrate] scene:', sceneDesc);
+    console.log('[Illustrate] scene description:', sceneDesc);
 
     // ─── שלב 2: הרכבת הפרומפט הסופי ─────────────────────────────────────────────
-    // סדר קבוע: סגנון → דמות עקבית → סצנה → פרטי איכות
-    // SDXL רגיש לסדר — הדמות חייבת לבוא לפני הסצנה לעקביות מרבית
-    const stylePrefix  = 'Pixar animation style, Disney Pixar 3D render, highly detailed smooth 3D, cinematic soft lighting, subsurface scattering';
-    const stylePostfix = 'expressive cute character, vibrant cheerful colors, children animated movie, octane render, 8k, same character design throughout';
-    const fullImagePrompt = `${stylePrefix}, ${characterAnchor}, ${sceneDesc}, ${stylePostfix}`;
+    const stylePrefix  = 'Pixar animation style, Disney Pixar 3D render, highly detailed, cinematic soft lighting, children\'s book illustration';
+    const stylePostfix = 'vibrant cheerful colors, expressive characters, children animated movie quality, 8k';
+    const fullImagePrompt = `${stylePrefix}. Scene: ${sceneDesc}. Style: ${stylePostfix}`;
 
     console.log('[Illustrate] full prompt:', fullImagePrompt);
 
@@ -189,7 +181,7 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
           },
           body: JSON.stringify({
             model: 'dall-e-3',
-            prompt: fullImagePrompt.slice(0, 1000),
+            prompt: fullImagePrompt.slice(0, 3500),
             n: 1,
             size: '1792x1024',
             response_format: 'b64_json',
@@ -283,7 +275,7 @@ Rules:
         },
         {
           role: 'user',
-          content: `Create a complete children's book illustration SVG for this scene: "${sceneDesc}". ONLY SVG code:`
+          content: `Create a complete children's book illustration SVG for this scene: "${sceneDesc.slice(0, 400)}". Include ALL characters mentioned. ONLY SVG code:`
         }
       ], 4000);
       const svgMatch = svgRaw.match(/<svg[\s\S]*<\/svg>/i);
