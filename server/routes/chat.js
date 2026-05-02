@@ -122,45 +122,80 @@ router.post('/illustrate', async (req, res) => {
   const historyRes = await query('SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC, id ASC', [sessionId]);
   const history = historyRes.rows;
   try {
-    // כל הודעות המשתמש – לחילוץ תיאור דמות עקבי
-    const allUserContent = history.filter(m => m.role === 'user').map(m => m.content).join('\n');
-    // הודעות הסיפור האחרונות (לא כלים) – לסצנה הנוכחית
     const toolKeywords = ['צייר לי', 'רעיון להמשך', 'נסח מחדש', 'תקן שגיאות', 'מה דעתך', 'סיימתי לכתוב', 'סיימתי לתכנן'];
-    const storyMessages = history
-      .filter(m => m.role === 'user' && !toolKeywords.some(kw => m.content.includes(kw)))
-      .slice(-6); // 6 הודעות סיפור אחרונות
-    const lastStoryMsg = storyMessages[storyMessages.length - 1]?.content || '';
-    const recentScene = storyMessages.slice(-3).map(m => m.content).join(' ');
+    const allUserContent = history.filter(m => m.role === 'user').map(m => m.content).join('\n');
+    const storyMessages = history.filter(m => m.role === 'user' && !toolKeywords.some(kw => m.content.includes(kw)));
+    const earlyStory    = storyMessages.slice(0, 6).map(m => m.content).join('\n');  // התחלת הסיפור – לתיאורי דמויות
+    const lastStoryMsg  = storyMessages[storyMessages.length - 1]?.content || '';
+    const recentScene   = storyMessages.slice(-4).map(m => m.content).join('\n');    // הכתיבה האחרונה – לסצנה
 
-    // ─── שלב 1: חילוץ תיאור סצנה מלא עם כל הדמויות ──────────────────────────────
-    const promptMessages = [
+    // ─── שלב 1: נעילת תיאורי דמויות מההזכרה הראשונה ────────────────────────────
+    // חשוב: תיאורי הדמויות נלקחים מתחילת הסיפור ולא משתנים לאורך כל האיורים
+    const characterPrompt = [
       {
         role: 'system',
-        content: `You are an expert at creating DALL-E illustration prompts from Hebrew children's stories.
-Analyze the story and output ONE detailed English paragraph (80-150 words) describing exactly what to illustrate.
+        content: `You extract FIXED character descriptions from a Hebrew children's story.
+For EVERY named character mentioned anywhere in the story, output their permanent physical description based on their FIRST appearance.
+
+Output format (one line per character, English only):
+CHARACTER "[name]": [age]-year-old [boy/girl], [hair color] [hair style] hair, [eye color] eyes, [skin tone] skin, wearing [specific clothing with colors]
 
 Rules:
-- Base the scene on the MOST RECENT writing, not the whole story
-- Include EVERY character mentioned in the recent scene: for each one describe their age, gender, hair, eyes, skin tone, clothing, expression, and what they are doing RIGHT NOW
-- If two or more characters appear together — describe all of them and their interaction
-- Describe the setting: location, time of day, atmosphere, key objects
-- Be specific and faithful to the text — do not invent details not in the story
-- English only, no Hebrew, no labels, no explanations — just the scene description paragraph`
+- Use ONLY details explicitly written by the author — never invent appearance details
+- If a detail (like eye color) is not mentioned, omit it
+- These descriptions are LOCKED and must never change between illustrations
+- Include every character mentioned, even minor ones`
       },
       {
         role: 'user',
-        content: `Full story for character details (Hebrew):\n"${allUserContent.slice(0, 1000)}"\n\nMost recent writing to illustrate (Hebrew):\n"${lastStoryMsg.slice(0, 600)}"\n\nRecent context (Hebrew):\n"${recentScene.slice(0, 500)}"\n\nWrite the illustration description paragraph:`
+        content: `Full story (Hebrew):\n"${allUserContent.slice(0, 1200)}"\n\nOutput character descriptions:`
       }
     ];
 
-    const sceneDesc = (await callAI(promptMessages, 250)).trim().replace(/["""'']/g, '').slice(0, 800);
+    // ─── שלב 2: תיאור הסצנה הנוכחית בלבד ────────────────────────────────────────
+    const scenePrompt = [
+      {
+        role: 'system',
+        content: `You extract the CURRENT SCENE from the most recent part of a Hebrew children's story.
+Output ONE short English paragraph (40-80 words) describing only what is happening RIGHT NOW.
 
-    console.log('[Illustrate] scene description:', sceneDesc);
+Rules:
+- Focus exclusively on the most recent writing
+- Describe: who is present, what each character is doing, where they are, key objects/details
+- Do NOT describe character appearance (that comes from elsewhere)
+- Do NOT summarize the whole story — only the current moment
+- English only, no Hebrew`
+      },
+      {
+        role: 'user',
+        content: `Most recent writing (Hebrew):\n"${lastStoryMsg.slice(0, 600)}"\n\nRecent context (Hebrew):\n"${recentScene.slice(0, 600)}"\n\nDescribe the current scene:`
+      }
+    ];
 
-    // ─── שלב 2: הרכבת הפרומפט הסופי ─────────────────────────────────────────────
-    const stylePrefix  = 'Pixar animation style, Disney Pixar 3D render, highly detailed, cinematic soft lighting, children\'s book illustration';
-    const stylePostfix = 'vibrant cheerful colors, expressive characters, children animated movie quality, 8k';
-    const fullImagePrompt = `${stylePrefix}. Scene: ${sceneDesc}. Style: ${stylePostfix}`;
+    // הרץ שני השלבים במקביל לחיסכון בזמן
+    const [characterAnchors, currentScene] = await Promise.all([
+      callAI(characterPrompt, 200).then(r => r.trim().replace(/["""'']/g, '')),
+      callAI(scenePrompt, 150).then(r => r.trim().replace(/["""'']/g, '')),
+    ]);
+
+    console.log('[Illustrate] character anchors:', characterAnchors);
+    console.log('[Illustrate] current scene:', currentScene);
+
+    // ─── שלב 3: הרכבת הפרומפט הסופי ─────────────────────────────────────────────
+    // DALL-E 3 מקבל הנחיה מפורשת על עקביות הדמויות
+    const fullImagePrompt = `Pixar / Disney 3D animation style, children's book illustration, cinematic soft lighting, vibrant cheerful colors, 8k quality.
+
+CHARACTERS (appearance is FIXED and must match exactly):
+${characterAnchors}
+
+CURRENT SCENE to illustrate:
+${currentScene}
+
+CRITICAL RULES:
+- Every character listed above must appear with their EXACT described appearance — same face, hair, clothing, throughout
+- Do not change or invent any appearance detail not listed above
+- If multiple characters are in the scene, show ALL of them
+- Illustrate what is happening in the CURRENT SCENE exactly as described`;
 
     console.log('[Illustrate] full prompt:', fullImagePrompt);
 
@@ -275,7 +310,7 @@ Rules:
         },
         {
           role: 'user',
-          content: `Create a complete children's book illustration SVG for this scene: "${sceneDesc.slice(0, 400)}". Include ALL characters mentioned. ONLY SVG code:`
+          content: `Create a complete children's book illustration SVG. Characters: "${characterAnchors.slice(0, 300)}". Scene: "${currentScene.slice(0, 300)}". Include ALL characters. ONLY SVG code:`
         }
       ], 4000);
       const svgMatch = svgRaw.match(/<svg[\s\S]*<\/svg>/i);
