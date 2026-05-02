@@ -6,30 +6,45 @@ import { SYSTEM_PROMPT } from '../systemPrompt.js';
 const router = Router();
 router.use(authenticate);
 
-async function callAI(messages, maxTokens = 1000) {
+async function callAI(messages, maxTokens = 1000, model = 'llama-3.3-70b-versatile') {
   const GROQ_KEY = process.env.GROQ_API_KEY;
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GROQ_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
-      messages,
-      temperature: 0.7,
-      max_tokens: maxTokens,
-    }),
-  });
+  const MAX_RETRIES = 4;
 
-  if (!response.ok) {
-    const err = await response.text();
-    console.error('Groq HTTP error:', response.status, err);
-    throw new Error(`Groq error: ${response.status}`);
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_KEY}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.7,
+        max_tokens: maxTokens,
+      }),
+    });
+
+    // Rate limit — המתן לפי הנחיית השרת ונסה שוב
+    if (response.status === 429) {
+      const retryAfter = parseInt(response.headers.get('retry-after') || '8');
+      const waitMs = (retryAfter + 1) * 1000;
+      console.warn(`[Groq] Rate limit (attempt ${attempt + 1}/${MAX_RETRIES}), waiting ${waitMs}ms...`);
+      await new Promise(r => setTimeout(r, waitMs));
+      continue;
+    }
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('Groq HTTP error:', response.status, err);
+      throw new Error(`Groq error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.choices[0].message.content;
   }
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+  throw new Error('Groq: rate limit exceeded after retries');
 }
 
 // קיצור היסטוריית שיחה לפני שליחה ל-Groq
@@ -142,7 +157,7 @@ CHARACTER "[exact name as written]": [age]-year-old [boy/girl], [hair color+styl
 Rules: use ONLY details the author explicitly wrote. If a detail is missing, omit it. Never invent.`
         },
         { role: 'user', content: `Story (Hebrew):\n"${text.slice(0, 1500)}"\n\nOutput character lines:` }
-      ], 300);
+      ], 300, 'llama-3.1-8b-instant');
       return res.trim().replace(/["""'']/g, '');
     };
 
@@ -181,7 +196,7 @@ English only. Never invent details not in the text.`
         role: 'user',
         content: `SAVED CHARACTER APPEARANCES (fixed, do not change):\n${characterAnchors}\n\nLATEST STORY TEXT:\n"${lastStoryMsg.slice(0, 700)}"\n\nRecent context:\n"${recentScene.slice(0, 400)}"\n\nOutput:`
       }
-    ], 300)).trim().replace(/["""'']/g, '');
+    ], 300, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
 
     // שמור דמויות חדשות אם נמצאו
     const newCharLines = mergedPrompt.split('\n').filter(l => l.startsWith('NEW_CHARACTER'));
