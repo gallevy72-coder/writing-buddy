@@ -6,7 +6,7 @@ import { SYSTEM_PROMPT } from '../systemPrompt.js';
 const router = Router();
 router.use(authenticate);
 
-async function callAI(messages, maxTokens = 1000, model = 'llama-3.3-70b-versatile') {
+async function callAI(messages, maxTokens = 1000, model = 'llama-3.1-8b-instant') {
   const GROQ_KEY = process.env.GROQ_API_KEY;
   const MAX_RETRIES = 2;
 
@@ -50,7 +50,7 @@ async function callAI(messages, maxTokens = 1000, model = 'llama-3.3-70b-versati
 // קיצור היסטוריית שיחה לפני שליחה ל-Groq
 // בעיה: שיחות ארוכות חורגות מ-12,000 TPM של הTier החינמי
 // פתרון: שמור 4 הודעות ראשונות (תכנון הסיפור) + 20 אחרונות, ומחק data: URLs ענקיות
-function trimHistory(history, maxMessages = 12, keepFirst = 3) {
+function trimHistory(history, maxMessages = 8, keepFirst = 2) {
   // מחק data: URLs מהודעות עם תמונות — הן ענקיות ולא נחוצות לצ'אט
   const clean = history.map(m => ({
     ...m,
