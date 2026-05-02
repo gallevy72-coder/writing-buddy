@@ -83,7 +83,14 @@ router.post('/', async (req, res) => {
     res.json({ message: assistantMessage });
   } catch (err) {
     console.error('Chat error:', err.message);
-    res.status(500).json({ error: 'שגיאה בתקשורת עם ה-AI. נסה שוב.' });
+    const isRateLimit = err.message?.includes('429') || err.message?.includes('rate limit');
+    const isTimeout   = err.message?.includes('timeout') || err.message?.includes('abort');
+    const msg = isRateLimit
+      ? 'השרת עמוס כרגע. המתן 10 שניות ונסה שוב.'
+      : isTimeout
+      ? 'התגובה לקחה יותר מדי זמן. נסה שוב.'
+      : 'שגיאה בתקשורת עם ה-AI. נסה שוב.';
+    res.status(500).json({ error: msg });
   }
 });
 
