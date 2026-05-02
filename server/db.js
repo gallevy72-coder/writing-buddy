@@ -55,8 +55,10 @@ export async function initDb() {
     );
   `);
 
-  // Safe migration in case table existed without story_text
+  // Safe migrations
   await pool.query(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS story_text TEXT DEFAULT NULL`);
+  // character_anchors: תיאורי דמויות קבועים שנחלצים פעם אחת ומשמשים לכל האיורים
+  await pool.query(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS character_anchors TEXT DEFAULT NULL`);
 
   console.log('[DB] PostgreSQL initialized');
 }

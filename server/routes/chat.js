@@ -124,78 +124,84 @@ router.post('/illustrate', async (req, res) => {
   try {
     const toolKeywords = ['צייר לי', 'רעיון להמשך', 'נסח מחדש', 'תקן שגיאות', 'מה דעתך', 'סיימתי לכתוב', 'סיימתי לתכנן'];
     const allUserContent = history.filter(m => m.role === 'user').map(m => m.content).join('\n');
-    const storyMessages = history.filter(m => m.role === 'user' && !toolKeywords.some(kw => m.content.includes(kw)));
-    const earlyStory    = storyMessages.slice(0, 6).map(m => m.content).join('\n');  // התחלת הסיפור – לתיאורי דמויות
-    const lastStoryMsg  = storyMessages[storyMessages.length - 1]?.content || '';
-    const recentScene   = storyMessages.slice(-4).map(m => m.content).join('\n');    // הכתיבה האחרונה – לסצנה
+    const storyMessages  = history.filter(m => m.role === 'user' && !toolKeywords.some(kw => m.content.includes(kw)));
+    const lastStoryMsg   = storyMessages[storyMessages.length - 1]?.content || '';
+    const recentScene    = storyMessages.slice(-4).map(m => m.content).join('\n');
 
-    // ─── שלב 1: נעילת תיאורי דמויות מההזכרה הראשונה ────────────────────────────
-    // חשוב: תיאורי הדמויות נלקחים מתחילת הסיפור ולא משתנים לאורך כל האיורים
-    const characterPrompt = [
-      {
-        role: 'system',
-        content: `You extract FIXED character descriptions from a Hebrew children's story.
-For EVERY named character mentioned anywhere in the story, output their permanent physical description based on their FIRST appearance.
+    // ─── שלב 1: תיאורי דמויות — חלץ פעם אחת ושמור לנצח ─────────────────────────
+    // אם כבר יש anchors שמורים לסשן הזה — השתמש בהם ישירות ללא חילוץ מחדש.
+    // זה מבטיח שהדמויות זהות בכל האיורים של אותו סיפור.
+    let characterAnchors = session.character_anchors || null;
 
-Output format (one line per character, English only):
-CHARACTER "[name]": [age]-year-old [boy/girl], [hair color] [hair style] hair, [eye color] eyes, [skin tone] skin, wearing [specific clothing with colors]
+    if (!characterAnchors) {
+      console.log('[Illustrate] Extracting character anchors for the first time...');
+      const characterPrompt = [
+        {
+          role: 'system',
+          content: `You extract PERMANENT character descriptions from a Hebrew children's story for use in AI image generation.
+For EVERY named character in the story, output their fixed physical description from their FIRST mention.
 
-Rules:
-- Use ONLY details explicitly written by the author — never invent appearance details
-- If a detail (like eye color) is not mentioned, omit it
-- These descriptions are LOCKED and must never change between illustrations
-- Include every character mentioned, even minor ones`
-      },
-      {
-        role: 'user',
-        content: `Full story (Hebrew):\n"${allUserContent.slice(0, 1200)}"\n\nOutput character descriptions:`
-      }
-    ];
+Output format — one line per character, English only, no Hebrew:
+CHARACTER "[name]": [age]-year-old [boy/girl], [hair color] [hair style] hair, [eye color] eyes, [skin tone] skin, always wearing [specific clothing with colors]
 
-    // ─── שלב 2: תיאור הסצנה הנוכחית בלבד ────────────────────────────────────────
+Critical rules:
+- Use ONLY details explicitly written by the author — NEVER invent or assume appearance
+- Be very specific: "curly red hair" not just "red hair", "bright green eyes" not just "eyes"
+- Include clothing details exactly as written — these anchor the character design
+- If a detail is not mentioned in the text, skip it rather than guessing
+- These anchors will be reused unchanged for every illustration in this story`
+        },
+        {
+          role: 'user',
+          content: `Full story text (Hebrew):\n"${allUserContent.slice(0, 1500)}"\n\nOutput character anchors:`
+        }
+      ];
+      characterAnchors = (await callAI(characterPrompt, 250)).trim().replace(/["""'']/g, '');
+      // שמור לבסיס הנתונים — לא יחולץ שוב
+      await query('UPDATE sessions SET character_anchors = $1 WHERE id = $2', [characterAnchors, sessionId]);
+      console.log('[Illustrate] Character anchors saved:', characterAnchors);
+    } else {
+      console.log('[Illustrate] Using saved character anchors:', characterAnchors);
+    }
+
+    // ─── שלב 2: חילוץ הסצנה הנוכחית בלבד ────────────────────────────────────────
     const scenePrompt = [
       {
         role: 'system',
-        content: `You extract the CURRENT SCENE from the most recent part of a Hebrew children's story.
-Output ONE short English paragraph (40-80 words) describing only what is happening RIGHT NOW.
+        content: `You describe the CURRENT SCENE from the most recent part of a Hebrew children's story, for use in an illustration.
+Output ONE English paragraph (50-90 words).
 
 Rules:
-- Focus exclusively on the most recent writing
-- Describe: who is present, what each character is doing, where they are, key objects/details
-- Do NOT describe character appearance (that comes from elsewhere)
-- Do NOT summarize the whole story — only the current moment
+- Describe ONLY what is happening RIGHT NOW in the latest writing
+- Include: which characters are present, their exact actions, the location, key objects, mood/atmosphere
+- Do NOT describe character appearance (handled separately)
+- Do NOT summarize the full story — only this moment
+- Be specific: "running toward the old wooden bridge" not just "running outside"
 - English only, no Hebrew`
       },
       {
         role: 'user',
-        content: `Most recent writing (Hebrew):\n"${lastStoryMsg.slice(0, 600)}"\n\nRecent context (Hebrew):\n"${recentScene.slice(0, 600)}"\n\nDescribe the current scene:`
+        content: `Latest writing (Hebrew):\n"${lastStoryMsg.slice(0, 700)}"\n\nRecent context (Hebrew):\n"${recentScene.slice(0, 500)}"\n\nDescribe the current scene:`
       }
     ];
 
-    // הרץ שני השלבים במקביל לחיסכון בזמן
-    const [characterAnchors, currentScene] = await Promise.all([
-      callAI(characterPrompt, 200).then(r => r.trim().replace(/["""'']/g, '')),
-      callAI(scenePrompt, 150).then(r => r.trim().replace(/["""'']/g, '')),
-    ]);
-
-    console.log('[Illustrate] character anchors:', characterAnchors);
-    console.log('[Illustrate] current scene:', currentScene);
+    const currentScene = (await callAI(scenePrompt, 150)).trim().replace(/["""'']/g, '');
+    console.log('[Illustrate] Current scene:', currentScene);
 
     // ─── שלב 3: הרכבת הפרומפט הסופי ─────────────────────────────────────────────
-    // DALL-E 3 מקבל הנחיה מפורשת על עקביות הדמויות
-    const fullImagePrompt = `Pixar / Disney 3D animation style, children's book illustration, cinematic soft lighting, vibrant cheerful colors, 8k quality.
+    const fullImagePrompt = `Pixar / Disney 3D children's book illustration, cinematic soft lighting, vibrant cheerful colors, 8k quality.
 
-CHARACTERS (appearance is FIXED and must match exactly):
+FIXED CHARACTER DESIGNS — render each character with EXACTLY these features, unchanged from any previous illustration:
 ${characterAnchors}
 
-CURRENT SCENE to illustrate:
+SCENE TO ILLUSTRATE RIGHT NOW:
 ${currentScene}
 
-CRITICAL RULES:
-- Every character listed above must appear with their EXACT described appearance — same face, hair, clothing, throughout
-- Do not change or invent any appearance detail not listed above
-- If multiple characters are in the scene, show ALL of them
-- Illustrate what is happening in the CURRENT SCENE exactly as described`;
+MANDATORY RULES:
+- Every character in the scene must match their FIXED DESIGN above exactly — same face structure, same hair color and style, same clothing
+- Show ALL characters who appear in the current scene
+- Do not alter, stylize, or reinterpret any character's appearance
+- Faithfully depict the action and setting described in the scene`;
 
     console.log('[Illustrate] full prompt:', fullImagePrompt);
 
