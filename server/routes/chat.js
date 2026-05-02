@@ -122,19 +122,25 @@ router.post('/illustrate', async (req, res) => {
   const historyRes = await query('SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC, id ASC', [sessionId]);
   const history = historyRes.rows;
   try {
-    // כל הטקסט של המשתמש – כולל שלב המסגרת (לחילוץ תיאור הדמויות)
+    // כל הודעות המשתמש – לחילוץ תיאור דמות עקבי
     const allUserContent = history.filter(m => m.role === 'user').map(m => m.content).join('\n');
-    // 4 הודעות אחרונות של המשתמש – לתיאור הסצנה הנוכחית
-    const recentScene = history.filter(m => m.role === 'user').slice(-4).map(m => m.content).join(' ');
+    // הודעות הסיפור האחרונות (לא כלים) – לסצנה הנוכחית
+    const toolKeywords = ['צייר לי', 'רעיון להמשך', 'נסח מחדש', 'תקן שגיאות', 'מה דעתך', 'סיימתי לכתוב', 'סיימתי לתכנן'];
+    const storyMessages = history
+      .filter(m => m.role === 'user' && !toolKeywords.some(kw => m.content.includes(kw)))
+      .slice(-6); // 6 הודעות סיפור אחרונות
+    const lastStoryMsg = storyMessages[storyMessages.length - 1]?.content || '';
+    const recentScene = storyMessages.slice(-3).map(m => m.content).join(' ');
 
-    // ─── שלב 1: חילוץ תיאור דמות קבוע + סצנה נוכחית בשני שורות נפרדות ──────────
-    // זה הסוד לעקביות: SDXL מקבל תיאור דמות זהה בכל ציור, רק הסצנה משתנה.
+    // ─── שלב 1: חילוץ תיאור דמות קבוע + סצנה נוכחית ────────────────────────────
     const promptMessages = [
       {
         role: 'system',
         content: `You extract illustration data from a Hebrew children's story. Output EXACTLY 2 lines, English only, no Hebrew, no quotes, no explanations:
-LINE 1 – CHARACTER (fixed physical traits that never change): [age]-year-old [boy/girl], [hair color] [hair length/style] hair, [eye color] eyes, [skin tone] skin, wearing [specific clothing with colors]
-LINE 2 – SCENE (current action and setting, no appearance): [exactly what the character is doing right now], [specific location/setting], [key objects in the scene]
+LINE 1 – CHARACTER (fixed physical traits): [age]-year-old [boy/girl], [hair color] [hair length/style] hair, [eye color] eyes, [skin tone] skin, wearing [specific clothing with colors]
+LINE 2 – CURRENT SCENE (what is happening RIGHT NOW in the most recent writing): [exact action the character is doing right now], [specific location], [key objects or details from the latest text]
+
+IMPORTANT: LINE 2 must describe what happens in the LATEST paragraph, not a general summary.
 
 Example output:
 8-year-old girl, short blonde curly hair, blue eyes, fair skin, wearing pink dress and white sneakers
@@ -142,7 +148,7 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
       },
       {
         role: 'user',
-        content: `Full story context (Hebrew – use for character appearance):\n"${allUserContent.slice(0, 800)}"\n\nCurrent scene (Hebrew – use for LINE 2 only):\n"${recentScene.slice(0, 400)}"\n\nOutput exactly 2 lines:`
+        content: `Full story (Hebrew – use for character appearance):\n"${allUserContent.slice(0, 800)}"\n\nMost recent writing (Hebrew – use for LINE 2):\n"${lastStoryMsg.slice(0, 500)}"\n\nRecent context:\n"${recentScene.slice(0, 400)}"\n\nOutput exactly 2 lines:`
       }
     ];
 
