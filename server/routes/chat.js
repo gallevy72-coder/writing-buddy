@@ -186,43 +186,42 @@ Critical rules:
       console.log('[Illustrate] Using saved anchors:', characterAnchors);
     }
 
-    // ─── שלב 2: תרגום + השלמת הגיון סצנה (קריאה אחת, 150 tokens) ──────────────
+    // ─── שלב 2: תרגום ממוקד — פעולה + מיקום בלבד ───────────────────────────────
     const sceneEn = (await callAI([
       {
         role: 'system',
-        content: `You translate a Hebrew children's story excerpt to English AND enrich it with logical scene details.
-
-Output 3-4 sentences:
-1. Translate the action and location from the Hebrew text
-2. Add logical background details that make sense given the context:
-   - Time of day → appropriate lighting and sky
-   - Day of week (e.g. Saturday/Shabbat → beach full of families, children playing, umbrellas, vendors)
-   - Season → matching nature, clothing of background people
-   - Popular location → fill with appropriate crowd and atmosphere
-   - Weather implied → clear sky, waves, shade, etc.
-3. Mention specific objects from the text
-
-Output English only. Do NOT describe the main characters' appearance — only actions, location, background, atmosphere.`
+        content: `Translate this Hebrew children's story excerpt to English in 2 sentences maximum.
+Describe ONLY: what the characters are doing right now + where they are + key objects.
+Do NOT add background people or crowds. Do NOT describe character appearance.
+Output English only, nothing else.`
       },
-      { role: 'user', content: `Story context: "${recentScene.slice(0, 400)}"\nLatest paragraph: "${lastStoryMsg.slice(0, 500)}"` }
-    ], 150, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
+      { role: 'user', content: `"${lastStoryMsg.slice(0, 500)}"` }
+    ], 80, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
 
     console.log('[Illustrate] Scene (EN):', sceneEn);
 
-    // ─── שלב 3: בניית פרומפט DALL-E ─────────────────────────────────────────────
-    const fullImagePrompt = `Pixar / Disney 3D children's book illustration, cinematic soft lighting, vibrant cheerful colors, 8k quality.
+    // ─── שלב 3: בניית פרומפט DALL-E — דמויות קודם, סצנה אחרי ─────────────────
+    // מבנה: "הצג את [דמות1] ו[דמות2] בחזית — הן עושות [פעולה] ב[מקום]"
+    // זה מונע מ-DALL-E להשמיט את הדמויות ולצייר רק רקע
+    const charNames = (characterAnchors.match(/CHARACTER "([^"]+)"/g) || [])
+      .map(l => l.replace(/CHARACTER "/g, '').replace(/"/g, ''))
+      .join(' and ');
 
-SCENE (illustrate this exactly, including all background details):
-${sceneEn}
+    const fullImagePrompt = `Pixar 3D animation, children's book illustration style, soft lighting, vibrant colors.
 
-MAIN CHARACTER DESIGNS — these are fixed and must not change between illustrations:
+FOREGROUND SUBJECT (most important — must be prominently shown):
+${charNames ? `Show ${charNames} prominently in the foreground of the image.` : 'Show the main characters prominently in the foreground.'}
 ${characterAnchors}
 
-MANDATORY RULES:
-- Every main character must match their EXACT design above: same face shape, same hair color and style, same clothing colors — no exceptions
-- The scene background must be rich and detailed: populate it logically (beach = families, umbrellas, waves; forest = trees, birds; etc.)
-- Show ALL main characters present in the scene
-- Do not invent or change any character appearance detail not listed above`;
+WHAT THEY ARE DOING RIGHT NOW:
+${sceneEn}
+
+BACKGROUND: match the setting described above. Keep background simple so characters remain the clear focus.
+
+CRITICAL:
+- Characters must be large and clearly visible in the foreground
+- Match each character's EXACT hair color, hair style, and clothing as listed above — do not change any detail
+- Both/all characters must appear together if the story shows them together`;
 
     console.log('[Illustrate] full prompt:', fullImagePrompt);
 
@@ -246,6 +245,7 @@ MANDATORY RULES:
             prompt: fullImagePrompt.slice(0, 3500),
             n: 1,
             size: '1792x1024',
+            style: 'natural',
             response_format: 'b64_json',
           }),
           signal: dalleController.signal,
