@@ -154,82 +154,68 @@ router.post('/illustrate', async (req, res) => {
     const recentScene    = storyMessages.slice(-4).map(m => m.content).join('\n');
 
     // ─── שלב 1: נעילת תיאורי דמויות ─────────────────────────────────────────────
-    // חלץ פעם אחת מתחילת הסיפור ושמור. עדכן רק אם יש דמויות חדשות.
     let characterAnchors = session.character_anchors || null;
 
     const extractAnchors = async (text) => {
       const res = await callAI([
         {
           role: 'system',
-          content: `You are extracting character descriptions from a Hebrew children's story for AI image generation.
+          content: `Read this Hebrew children's story and list ONLY the characters who have an explicit name in the text.
 
-STRICT RULES:
-1. List ONLY characters who are explicitly named in the story text
-2. Do NOT invent characters, do NOT add unnamed background people
-3. Do NOT add appearance details not explicitly written by the author
-4. If a detail (eye color, clothing) is not mentioned — write "unspecified"
-5. Output ONE line per named character, in English only
-
-FORMAT per character:
-CHARACTER "[Hebrew name romanized]": [child/teen/adult] [boy/girl], hair: [exact color + length + style or "unspecified"], eyes: [color or "unspecified"], wearing: [exact clothing details or "unspecified"]
-
-Example:
-CHARACTER "Neta": child girl, hair: long straight red hair, eyes: unspecified, wearing: blue t-shirt and jeans`
+Rules:
+- Count the named characters first, then list them
+- Start your response with: TOTAL_CHARACTERS: [number]
+- Then one line per named character in English:
+  CHARACTER "[name romanized]": [boy/girl/man/woman], hair: [description or "not described"], wearing: [description or "not described"]
+- If an appearance detail is NOT written in the story, write "not described" — do NOT invent details
+- Do NOT list unnamed characters (passersby, crowds, background people)
+- Do NOT add any characters not explicitly named in the text`
         },
-        { role: 'user', content: `Hebrew story:\n"${text.slice(0, 2000)}"\n\nList ONLY the named characters (do not invent any):` }
-      ], 300, 'llama-3.1-8b-instant');
+        { role: 'user', content: `Hebrew story text:\n${text.slice(0, 2000)}\n\nList named characters only:` }
+      ], 250, 'llama-3.1-8b-instant');
       return res.trim().replace(/["""'']/g, '');
     };
 
     if (!characterAnchors) {
       characterAnchors = await extractAnchors(allUserContent);
       await query('UPDATE sessions SET character_anchors = $1 WHERE id = $2', [characterAnchors, sessionId]);
-      console.log('[Illustrate] Anchors saved:', characterAnchors);
+      console.log('[Illustrate] Anchors extracted & saved:\n', characterAnchors);
     } else {
-      console.log('[Illustrate] Using saved anchors:', characterAnchors);
+      console.log('[Illustrate] Using saved anchors:\n', characterAnchors);
     }
 
-    // ─── שלב 2: תרגום ממוקד — פעולה + מיקום בלבד ───────────────────────────────
-    const sceneEn = (await callAI([
-      {
-        role: 'system',
-        content: `Translate this Hebrew children's story excerpt to English in 2 sentences maximum.
-Describe ONLY: what the characters are doing right now + where they are + key objects.
-Do NOT add background people or crowds. Do NOT describe character appearance.
-Output English only, nothing else.`
-      },
-      { role: 'user', content: `"${lastStoryMsg.slice(0, 500)}"` }
-    ], 80, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
-
-    console.log('[Illustrate] Scene (EN):', sceneEn);
-
-    // ─── שלב 3: בניית פרומפט DALL-E — דמויות קודם, סצנה אחרי ─────────────────
+    // חלץ מספר דמויות ממה שGroq החזיר
+    const totalMatch = characterAnchors.match(/TOTAL_CHARACTERS:\s*(\d+)/i);
+    const charCount = totalMatch ? parseInt(totalMatch[1]) : (characterAnchors.match(/CHARACTER "/g) || []).length || 1;
     const charLines = (characterAnchors.match(/CHARACTER "[^"]+":?[^\n]*/g) || []);
     const charNames = charLines
       .map(l => { const m = l.match(/CHARACTER "([^"]+)"/); return m ? m[1] : ''; })
-      .filter(Boolean)
-      .join(' and ');
-    const charCount = charLines.length || 1;
+      .filter(Boolean).join(' and ');
 
-    const fullImagePrompt = `Pixar 3D animation style, children's book illustration, soft warm lighting, vibrant colors.
+    // ─── שלב 2: Groq בונה את פרומפט DALL-E ישירות ─────────────────────────────
+    // גישה חדשה: במקום לתרגם סצנה בנפרד ואז לבנות פרומפט,
+    // Groq מייצר את הפרומפט המלא ישירות — כולל דמויות + סצנה + הוראות קומפוזיציה
+    const fullImagePrompt = (await callAI([
+      {
+        role: 'system',
+        content: `You write image generation prompts for a children's story illustrator (DALL-E 3).
+Your output is a single paragraph in English, ready to send to DALL-E. Nothing else — no explanations, no labels.
 
-CHARACTERS IN THIS STORY (there are EXACTLY ${charCount} named character${charCount > 1 ? 's' : ''}):
-${characterAnchors}
+Rules for the prompt you write:
+1. Start with: "Pixar 3D animation style, children's book illustration, soft warm lighting."
+2. Name each character with their appearance, then describe what they are doing and where.
+3. The scene contains ONLY the named story characters — no other people anywhere.
+4. End with: "No other humans, no crowds, no background people. Only the named characters appear in this image."
+5. Maximum 120 words.`
+      },
+      {
+        role: 'user',
+        content: `Story characters (${charCount} total):\n${characterAnchors}\n\nLatest scene (Hebrew):\n"${lastStoryMsg.slice(0, 400)}"\n\nWrite the DALL-E prompt:`
+      }
+    ], 180, 'llama-3.1-8b-instant')).trim().replace(/^["']|["']$/g, '');
 
-SCENE — what is happening right now:
-${sceneEn}
-
-COMPOSITION RULES — follow strictly:
-- Show EXACTLY ${charCount} character${charCount > 1 ? 's' : ''} total: ${charNames || 'the main character'}
-- Characters fill the CENTER FOREGROUND — large, clear, expressive faces
-- ZERO background people, ZERO crowds, ZERO bystanders, ZERO extra figures of any kind
-- Background shows only the environment (sky, beach, trees, buildings, etc.) — no people
-- Match EXACTLY each character's hair color, length, style and clothing — do not change any detail
-- ${charCount > 1 ? 'All characters visible together in the same frame' : 'Character centered in frame'}
-- Empty, peaceful background environment only — the characters are the only humans/people in the image`;
-
-    console.log(`[Illustrate] charCount=${charCount} charNames="${charNames}"`);
-    console.log('[Illustrate] full prompt:', fullImagePrompt);
+    console.log(`[Illustrate] charCount=${charCount} names="${charNames}"`);
+    console.log('[Illustrate] DALL-E prompt:\n', fullImagePrompt);
 
     console.log('[Illustrate] full prompt:', fullImagePrompt);
 
