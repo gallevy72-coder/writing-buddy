@@ -28,16 +28,17 @@ async function callAI(messages, maxTokens = 1000, model = 'llama-3.1-8b-instant'
     // Rate limit — המתן מקסימום 6 שניות ונסה שוב פעם אחת
     if (response.status === 429 && attempt < MAX_RETRIES - 1) {
       const retryAfterRaw = parseFloat(response.headers.get('retry-after') || '5');
-      const waitMs = Math.min(retryAfterRaw * 1000, 6000); // מקסימום 6 שניות
-      console.warn(`[Groq] Rate limit, waiting ${waitMs}ms then retrying...`);
+      const waitMs = Math.min(retryAfterRaw * 1000, 6000);
+      const errBody = await response.text();
+      console.warn(`[Groq 429] model=${model} retry-after=${retryAfterRaw}s body=${errBody.slice(0,200)}`);
       await new Promise(r => setTimeout(r, waitMs));
       continue;
     }
 
     if (!response.ok) {
       const err = await response.text();
-      console.error('Groq HTTP error:', response.status, err);
-      throw new Error(`Groq error: ${response.status}`);
+      console.error(`[Groq ERROR] status=${response.status} model=${model} body=${err.slice(0,300)}`);
+      throw new Error(`Groq error: ${response.status} ${err.slice(0,100)}`);
     }
 
     const data = await response.json();
@@ -72,12 +73,14 @@ router.post('/', async (req, res) => {
     const session = sessionRes.rows[0];
     if (!session) return res.status(404).json({ error: 'סשן לא נמצא' });
     if (session.status === 'completed') return res.status(400).json({ error: 'הסשן כבר הסתיים' });
-    await query('INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'user', message]);
+    // טוען היסטוריה לפני שמירה — ושומר רק אחרי תגובה מוצלחת למניעת כפילויות
     const historyRes = await query('SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC, id ASC', [sessionId]);
     const history = historyRes.rows;
-    const trimmed = trimHistory(history);
+    const trimmed = trimHistory([...history, { role: 'user', content: message }]);
     const openaiMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...trimmed.map(m => ({ role: m.role, content: m.content }))];
     const assistantMessage = await callAI(openaiMessages);
+    // שומר רק אחרי הצלחה — אם Groq נכשל, לא נשמר כלום ואין כפילויות
+    await query('INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'user', message]);
     await query('INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'assistant', assistantMessage]);
     await query('UPDATE sessions SET updated_at = NOW() WHERE id = $1', [sessionId]);
     res.json({ message: assistantMessage });
