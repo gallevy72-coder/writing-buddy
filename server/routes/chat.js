@@ -164,44 +164,53 @@ Critical rules:
       console.log('[Illustrate] Using saved character anchors:', characterAnchors);
     }
 
-    // ─── שלב 2: חילוץ הסצנה הנוכחית בלבד ────────────────────────────────────────
+    // ─── שלב 2: חילוץ הסצנה הנוכחית — ספציפי ומפורט ────────────────────────────
     const scenePrompt = [
       {
         role: 'system',
-        content: `You describe the CURRENT SCENE from the most recent part of a Hebrew children's story, for use in an illustration.
-Output ONE English paragraph (50-90 words).
+        content: `You are writing a detailed scene description for an AI image generator, based on the latest paragraph of a Hebrew children's story.
 
-Rules:
-- Describe ONLY what is happening RIGHT NOW in the latest writing
-- Include: which characters are present, their exact actions, the location, key objects, mood/atmosphere
-- Do NOT describe character appearance (handled separately)
-- Do NOT summarize the full story — only this moment
-- Be specific: "running toward the old wooden bridge" not just "running outside"
-- English only, no Hebrew`
+Output ONE English paragraph (80-120 words) that describes ONLY the current moment. Be extremely specific.
+
+You MUST include ALL of these:
+1. LOCATION: exact place — describe the environment in detail (indoors/outdoors, what kind of room/forest/street, time of day, weather, colors of the surroundings)
+2. ACTION: exactly what each character is doing RIGHT NOW — their body position, gesture, expression, movement direction
+3. OBJECTS: every object mentioned in the latest writing — where it is, what it looks like
+4. ATMOSPHERE: mood, lighting, energy of the scene
+
+DO NOT:
+- Describe character appearance (hair, clothing, etc.) — that is handled separately
+- Summarize the whole story
+- Invent details not in the text
+- Be vague ("outside", "somewhere") — always be specific
+
+English only, no Hebrew, no labels.`
       },
       {
         role: 'user',
-        content: `Latest writing (Hebrew):\n"${lastStoryMsg.slice(0, 700)}"\n\nRecent context (Hebrew):\n"${recentScene.slice(0, 500)}"\n\nDescribe the current scene:`
+        content: `THE LATEST PARAGRAPH (illustrate THIS):\n"${lastStoryMsg.slice(0, 800)}"\n\nRecent story context:\n"${recentScene.slice(0, 600)}"\n\nWrite the detailed scene description:`
       }
     ];
 
-    const currentScene = (await callAI(scenePrompt, 150)).trim().replace(/["""'']/g, '');
+    const currentScene = (await callAI(scenePrompt, 200)).trim().replace(/["""'']/g, '');
     console.log('[Illustrate] Current scene:', currentScene);
 
-    // ─── שלב 3: הרכבת הפרומפט הסופי ─────────────────────────────────────────────
-    const fullImagePrompt = `Pixar / Disney 3D children's book illustration, cinematic soft lighting, vibrant cheerful colors, 8k quality.
+    // ─── שלב 3: הרכבת הפרומפט הסופי — סצנה ראשונה, דמויות שניות ────────────────
+    // סצנה בא ראשון כי DALL-E 3 נותן משקל גבוה יותר לתחילת הפרומפט
+    const fullImagePrompt = `Pixar / Disney 3D children's book illustration style, cinematic soft lighting, vibrant colors, 8k.
 
-FIXED CHARACTER DESIGNS — render each character with EXACTLY these features, unchanged from any previous illustration:
-${characterAnchors}
-
-SCENE TO ILLUSTRATE RIGHT NOW:
+ILLUSTRATE THIS EXACT SCENE:
 ${currentScene}
 
-MANDATORY RULES:
-- Every character in the scene must match their FIXED DESIGN above exactly — same face structure, same hair color and style, same clothing
-- Show ALL characters who appear in the current scene
-- Do not alter, stylize, or reinterpret any character's appearance
-- Faithfully depict the action and setting described in the scene`;
+CHARACTER APPEARANCES — every character must look EXACTLY like this, no exceptions:
+${characterAnchors}
+
+STRICT RULES:
+- The scene description above is the absolute truth — illustrate it faithfully, every detail
+- Characters must match their descriptions exactly: same face, same hair, same clothing
+- Show ALL characters who are present in the scene
+- The background and environment must match the scene description precisely
+- This is a NEW scene — do not repeat a previous illustration`;
 
     console.log('[Illustrate] full prompt:', fullImagePrompt);
 
