@@ -168,9 +168,48 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
 
     let dataUrl = null;
 
-    // ─── ניסיון 1: HuggingFace FLUX.1-schnell ───────────────────────────────────
+    // ─── ניסיון 1: OpenAI DALL-E 3 ──────────────────────────────────────────────
+    const OPENAI_KEY = process.env.OPENAI_API_KEY;
+    if (OPENAI_KEY && !dataUrl) {
+      try {
+        console.log('[Illustrate] Trying OpenAI DALL-E 3...');
+        const dalleController = new AbortController();
+        const dalleTimer = setTimeout(() => dalleController.abort(), 60000);
+        const dalleRes = await fetch('https://api.openai.com/v1/images/generations', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENAI_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'dall-e-3',
+            prompt: fullImagePrompt.slice(0, 1000),
+            n: 1,
+            size: '1792x1024',
+            response_format: 'b64_json',
+          }),
+          signal: dalleController.signal,
+        });
+        clearTimeout(dalleTimer);
+        if (dalleRes.ok) {
+          const dalleData = await dalleRes.json();
+          const b64 = dalleData.data[0].b64_json;
+          dataUrl = `data:image/png;base64,${b64}`;
+          console.log('[Illustrate] DALL-E 3 OK! size:', Math.round(b64.length / 1024), 'KB');
+        } else {
+          const derr = await dalleRes.text();
+          console.warn('[Illustrate] DALL-E 3 failed:', dalleRes.status, derr.slice(0, 150));
+        }
+      } catch (e) {
+        console.warn('[Illustrate] DALL-E 3 error:', e.message);
+      }
+    } else if (!OPENAI_KEY) {
+      console.warn('[Illustrate] OPENAI_API_KEY not set — skipping DALL-E 3');
+    }
+
+    // ─── ניסיון 2: HuggingFace FLUX.1-schnell ───────────────────────────────────
     const HF_KEY = process.env.HF_API_KEY;
-    if (HF_KEY) {
+    if (HF_KEY && !dataUrl) {
       const model = 'black-forest-labs/FLUX.1-schnell';
       try {
         console.log('[Illustrate] Trying HuggingFace:', model);
@@ -215,7 +254,7 @@ running through a sunny park, searching behind a big oak tree, colorful flowers 
       } catch (e) {
         console.warn('[Illustrate] HuggingFace error:', e.message);
       }
-    } else {
+    } else if (!HF_KEY) {
       console.warn('[Illustrate] HF_API_KEY not set — skipping HuggingFace');
     }
 
