@@ -88,7 +88,7 @@ router.patch('/:id', async (req, res) => {
       return res.status(404).json({ error: 'סשן לא נמצא' });
     }
 
-    const { status, title, story_text } = req.body;
+    const { status, title, story_text, reset_character_anchors } = req.body;
 
     if (status && !['active', 'completed'].includes(status)) {
       return res.status(400).json({ error: 'סטטוס לא תקין' });
@@ -109,6 +109,11 @@ router.patch('/:id', async (req, res) => {
     if (story_text !== undefined) {
       updates.push(`story_text = $${idx++}`);
       values.push(story_text);
+    }
+    if (reset_character_anchors) {
+      // איפוס תיאורי הדמויות — יחולצו מחדש באיור הבא
+      updates.push(`character_anchors = $${idx++}`);
+      values.push(null);
     }
 
     if (updates.length > 0) {

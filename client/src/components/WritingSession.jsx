@@ -535,6 +535,17 @@ export default function WritingSession({ user, token, onLogout }) {
           {session?.status === 'active' && !isFrameworkPhase && (
             <div className="flex items-center gap-2">
               <button
+                onClick={async () => {
+                  if (!window.confirm('לאפס את תיאורי הדמויות? האיור הבא יחלץ אותם מחדש מהסיפור.')) return;
+                  await api.patch(`/api/sessions/${id}`, { reset_character_anchors: true });
+                  alert('✅ תיאורי הדמויות אופסו. האיור הבא ישתמש בתיאורים עדכניים.');
+                }}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-2 rounded-xl font-bold text-xs transition-colors shadow"
+                title="אפס תיאורי דמויות לאיורים"
+              >
+                🔄 אפס דמויות
+              </button>
+              <button
                 onClick={() => setShowGallery(true)}
                 className="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-2 rounded-xl font-bold text-sm transition-colors shadow flex items-center gap-1"
                 title="גלריית האיורים"
