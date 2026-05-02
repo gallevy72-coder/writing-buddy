@@ -192,27 +192,32 @@ Rules:
       .map(l => { const m = l.match(/CHARACTER "([^"]+)"/); return m ? m[1] : ''; })
       .filter(Boolean).join(' and ');
 
-    // ─── שלב 2: Groq בונה את פרומפט DALL-E ישירות ─────────────────────────────
-    // גישה חדשה: במקום לתרגם סצנה בנפרד ואז לבנות פרומפט,
-    // Groq מייצר את הפרומפט המלא ישירות — כולל דמויות + סצנה + הוראות קומפוזיציה
-    const fullImagePrompt = (await callAI([
+    // ─── שלב 2: תרגום סצנה ─────────────────────────────────────────────────────
+    const sceneEn = (await callAI([
       {
         role: 'system',
-        content: `You write image generation prompts for a children's story illustrator (DALL-E 3).
-Your output is a single paragraph in English, ready to send to DALL-E. Nothing else — no explanations, no labels.
-
-Rules for the prompt you write:
-1. Start with: "Pixar 3D animation style, children's book illustration, soft warm lighting."
-2. Name each character with their appearance, then describe what they are doing and where.
-3. The scene contains ONLY the named story characters — no other people anywhere.
-4. End with: "No other humans, no crowds, no background people. Only the named characters appear in this image."
-5. Maximum 120 words.`
+        content: `Translate this Hebrew children's story excerpt to English in 2 sentences.
+Describe ONLY: what the main characters are doing right now + where they are + key objects.
+Do NOT describe character appearances. Output English only.`
       },
-      {
-        role: 'user',
-        content: `Story characters (${charCount} total):\n${characterAnchors}\n\nLatest scene (Hebrew):\n"${lastStoryMsg.slice(0, 400)}"\n\nWrite the DALL-E prompt:`
-      }
-    ], 180, 'llama-3.1-8b-instant')).trim().replace(/^["']|["']$/g, '');
+      { role: 'user', content: `"${lastStoryMsg.slice(0, 500)}"` }
+    ], 80, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
+
+    // ─── שלב 3: בניית פרומפט DALL-E ────────────────────────────────────────────
+    // מטרה: דמויות ראשיות תמיד בחזית עם אותו מראה, הרקע משתנה לפי הסיטואציה
+    const fullImagePrompt = `Pixar 3D animation style, children's book illustration, soft warm lighting, vibrant colors.
+
+MAIN CHARACTERS (foreground — large and prominent):
+${characterAnchors}
+These characters MUST appear in every illustration with EXACTLY the appearance described above — same hair, same clothes, same features every time. They stand in the CENTER FOREGROUND, large and clearly visible.
+
+CURRENT SCENE:
+${sceneEn}
+
+BACKGROUND:
+Match the setting of the scene (outdoors, beach, school, forest, etc.). Background may naturally include other small, blurry, out-of-focus figures if the scene implies a public place — but they must remain small and in the far background. The main characters above are always the clear focal point.
+
+CONSISTENCY RULE: The main characters' appearance must match the descriptions above precisely — hair color, hair style, clothing colors and style must not change between illustrations.`;
 
     console.log(`[Illustrate] charCount=${charCount} names="${charNames}"`);
     console.log('[Illustrate] DALL-E prompt:\n', fullImagePrompt);
