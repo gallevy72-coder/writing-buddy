@@ -8,7 +8,7 @@ router.use(authenticate);
 
 async function callAI(messages, maxTokens = 1000, model = 'llama-3.3-70b-versatile') {
   const GROQ_KEY = process.env.GROQ_API_KEY;
-  const MAX_RETRIES = 4;
+  const MAX_RETRIES = 2;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -25,11 +25,11 @@ async function callAI(messages, maxTokens = 1000, model = 'llama-3.3-70b-versati
       }),
     });
 
-    // Rate limit — המתן לפי הנחיית השרת ונסה שוב
-    if (response.status === 429) {
-      const retryAfter = parseInt(response.headers.get('retry-after') || '8');
-      const waitMs = (retryAfter + 1) * 1000;
-      console.warn(`[Groq] Rate limit (attempt ${attempt + 1}/${MAX_RETRIES}), waiting ${waitMs}ms...`);
+    // Rate limit — המתן מקסימום 6 שניות ונסה שוב פעם אחת
+    if (response.status === 429 && attempt < MAX_RETRIES - 1) {
+      const retryAfterRaw = parseFloat(response.headers.get('retry-after') || '5');
+      const waitMs = Math.min(retryAfterRaw * 1000, 6000); // מקסימום 6 שניות
+      console.warn(`[Groq] Rate limit, waiting ${waitMs}ms then retrying...`);
       await new Promise(r => setTimeout(r, waitMs));
       continue;
     }
@@ -50,7 +50,7 @@ async function callAI(messages, maxTokens = 1000, model = 'llama-3.3-70b-versati
 // קיצור היסטוריית שיחה לפני שליחה ל-Groq
 // בעיה: שיחות ארוכות חורגות מ-12,000 TPM של הTier החינמי
 // פתרון: שמור 4 הודעות ראשונות (תכנון הסיפור) + 20 אחרונות, ומחק data: URLs ענקיות
-function trimHistory(history, maxMessages = 20, keepFirst = 4) {
+function trimHistory(history, maxMessages = 12, keepFirst = 3) {
   // מחק data: URLs מהודעות עם תמונות — הן ענקיות ולא נחוצות לצ'אט
   const clean = history.map(m => ({
     ...m,
