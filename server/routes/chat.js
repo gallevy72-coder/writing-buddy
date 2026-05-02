@@ -161,19 +161,22 @@ router.post('/illustrate', async (req, res) => {
       const res = await callAI([
         {
           role: 'system',
-          content: `Extract PERMANENT visual descriptions of every named character from this Hebrew children's story, for use in AI image generation.
+          content: `You are extracting character descriptions from a Hebrew children's story for AI image generation.
 
-One line per character, English only:
-CHARACTER "[name]": [age]-year-old [boy/girl], [very specific hair: color + length + style e.g. "long wavy auburn hair in a ponytail"], [eye color] eyes, [skin tone] skin, ALWAYS wearing [specific clothing: item + color + style e.g. "orange tank top, green shorts, barefoot"]
+STRICT RULES:
+1. List ONLY characters who are explicitly named in the story text
+2. Do NOT invent characters, do NOT add unnamed background people
+3. Do NOT add appearance details not explicitly written by the author
+4. If a detail (eye color, clothing) is not mentioned — write "unspecified"
+5. Output ONE line per named character, in English only
 
-Critical rules:
-- Use ONLY details the author explicitly wrote — never guess or invent
-- Be maximally specific: "wavy shoulder-length chestnut brown hair" not just "brown hair"
-- Clothing details are the strongest anchor for DALL-E consistency — include every detail mentioned
-- If appearance detail is missing, write "unspecified" so DALL-E doesn't invent wildly
-- These descriptions are permanently locked for the entire story`
+FORMAT per character:
+CHARACTER "[Hebrew name romanized]": [child/teen/adult] [boy/girl], hair: [exact color + length + style or "unspecified"], eyes: [color or "unspecified"], wearing: [exact clothing details or "unspecified"]
+
+Example:
+CHARACTER "Neta": child girl, hair: long straight red hair, eyes: unspecified, wearing: blue t-shirt and jeans`
         },
-        { role: 'user', content: `Story (Hebrew):\n"${text.slice(0, 1500)}"\n\nOutput character lines:` }
+        { role: 'user', content: `Hebrew story:\n"${text.slice(0, 2000)}"\n\nList ONLY the named characters (do not invent any):` }
       ], 300, 'llama-3.1-8b-instant');
       return res.trim().replace(/["""'']/g, '');
     };
@@ -201,27 +204,32 @@ Output English only, nothing else.`
     console.log('[Illustrate] Scene (EN):', sceneEn);
 
     // ─── שלב 3: בניית פרומפט DALL-E — דמויות קודם, סצנה אחרי ─────────────────
-    // מבנה: "הצג את [דמות1] ו[דמות2] בחזית — הן עושות [פעולה] ב[מקום]"
-    // זה מונע מ-DALL-E להשמיט את הדמויות ולצייר רק רקע
-    const charNames = (characterAnchors.match(/CHARACTER "([^"]+)"/g) || [])
-      .map(l => l.replace(/CHARACTER "/g, '').replace(/"/g, ''))
+    const charLines = (characterAnchors.match(/CHARACTER "[^"]+":?[^\n]*/g) || []);
+    const charNames = charLines
+      .map(l => { const m = l.match(/CHARACTER "([^"]+)"/); return m ? m[1] : ''; })
+      .filter(Boolean)
       .join(' and ');
+    const charCount = charLines.length || 1;
 
-    const fullImagePrompt = `Pixar 3D animation, children's book illustration style, soft lighting, vibrant colors.
+    const fullImagePrompt = `Pixar 3D animation style, children's book illustration, soft warm lighting, vibrant colors.
 
-FOREGROUND SUBJECT (most important — must be prominently shown):
-${charNames ? `Show ${charNames} prominently in the foreground of the image.` : 'Show the main characters prominently in the foreground.'}
+CHARACTERS IN THIS STORY (there are EXACTLY ${charCount} named character${charCount > 1 ? 's' : ''}):
 ${characterAnchors}
 
-WHAT THEY ARE DOING RIGHT NOW:
+SCENE — what is happening right now:
 ${sceneEn}
 
-BACKGROUND: match the setting described above. Keep background simple so characters remain the clear focus.
+COMPOSITION RULES — follow strictly:
+- Show EXACTLY ${charCount} character${charCount > 1 ? 's' : ''} total: ${charNames || 'the main character'}
+- Characters fill the CENTER FOREGROUND — large, clear, expressive faces
+- ZERO background people, ZERO crowds, ZERO bystanders, ZERO extra figures of any kind
+- Background shows only the environment (sky, beach, trees, buildings, etc.) — no people
+- Match EXACTLY each character's hair color, length, style and clothing — do not change any detail
+- ${charCount > 1 ? 'All characters visible together in the same frame' : 'Character centered in frame'}
+- Empty, peaceful background environment only — the characters are the only humans/people in the image`;
 
-CRITICAL:
-- Characters must be large and clearly visible in the foreground
-- Match each character's EXACT hair color, hair style, and clothing as listed above — do not change any detail
-- Both/all characters must appear together if the story shows them together`;
+    console.log(`[Illustrate] charCount=${charCount} charNames="${charNames}"`);
+    console.log('[Illustrate] full prompt:', fullImagePrompt);
 
     console.log('[Illustrate] full prompt:', fullImagePrompt);
 
