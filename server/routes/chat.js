@@ -153,76 +153,82 @@ router.post('/illustrate', async (req, res) => {
     const lastStoryMsg   = storyMessages[storyMessages.length - 1]?.content || '';
     const recentScene    = storyMessages.slice(-4).map(m => m.content).join('\n');
 
-    // ─── שלב 1: נעילת תיאורי דמויות ─────────────────────────────────────────────
+    // ─── שלב 1: Character Bible — תיאורי דמויות קבועים ─────────────────────────
     let characterAnchors = session.character_anchors || null;
 
     const extractAnchors = async (text) => {
       const res = await callAI([
         {
           role: 'system',
-          content: `Read this Hebrew children's story and list ONLY the characters who have an explicit name in the text.
+          content: `You are a character designer for a children's illustrated book. Read the Hebrew story and create a permanent visual "ID card" for every named character.
 
-Rules:
-- Count the named characters first, then list them
-- Start your response with: TOTAL_CHARACTERS: [number]
-- Then one line per named character in English:
-  CHARACTER "[name romanized]": [boy/girl/man/woman], hair: [description or "not described"], wearing: [description or "not described"]
-- If an appearance detail is NOT written in the story, write "not described" — do NOT invent details
-- Do NOT list unnamed characters (passersby, crowds, background people)
-- Do NOT add any characters not explicitly named in the text`
+RULES:
+1. List ONLY named characters (who have an explicit name in the text)
+2. Start with: TOTAL_CHARACTERS: [number]
+3. For each named character, write ONE line in English using this exact format:
+   CHARACTER "[name romanized]": [age]-year-old [boy/girl/man/woman], [hair color and style], wearing [specific outfit with colors], [any unique features like glasses, freckles, wheelchair — or omit if none]
+4. CRITICAL: If a visual detail (hair color, clothing) is NOT mentioned in the story — you MUST INVENT a specific, consistent detail. Never write "not described" or "unspecified". Invent once, use forever.
+5. Be maximally specific: "shoulder-length wavy auburn hair" not "brown hair". "bright yellow raincoat and red rubber boots" not "jacket".
+
+Example output:
+TOTAL_CHARACTERS: 2
+CHARACTER "Neta": 9-year-old girl, long straight red hair tied in a ponytail, wearing an orange t-shirt and denim shorts, carrying a metal detector
+CHARACTER "Yuli": 9-year-old girl, short curly dark brown hair, wearing a light blue dress with white dots, barefoot`
         },
-        { role: 'user', content: `Hebrew story text:\n${text.slice(0, 2000)}\n\nList named characters only:` }
-      ], 250, 'llama-3.1-8b-instant');
+        { role: 'user', content: `Hebrew story:\n${text.slice(0, 2000)}\n\nCreate the character bible:` }
+      ], 350, 'llama-3.1-8b-instant');
       return res.trim().replace(/["""'']/g, '');
     };
 
     if (!characterAnchors) {
       characterAnchors = await extractAnchors(allUserContent);
       await query('UPDATE sessions SET character_anchors = $1 WHERE id = $2', [characterAnchors, sessionId]);
-      console.log('[Illustrate] Anchors extracted & saved:\n', characterAnchors);
+      console.log('[Illustrate] Character Bible saved:\n', characterAnchors);
     } else {
-      console.log('[Illustrate] Using saved anchors:\n', characterAnchors);
+      console.log('[Illustrate] Using saved Character Bible:\n', characterAnchors);
     }
 
-    // חלץ מספר דמויות ממה שGroq החזיר
     const totalMatch = characterAnchors.match(/TOTAL_CHARACTERS:\s*(\d+)/i);
     const charCount = totalMatch ? parseInt(totalMatch[1]) : (characterAnchors.match(/CHARACTER "/g) || []).length || 1;
-    const charLines = (characterAnchors.match(/CHARACTER "[^"]+":?[^\n]*/g) || []);
-    const charNames = charLines
-      .map(l => { const m = l.match(/CHARACTER "([^"]+)"/); return m ? m[1] : ''; })
-      .filter(Boolean).join(' and ');
+    const charNames = (characterAnchors.match(/CHARACTER "([^"]+)"/g) || [])
+      .map(l => l.replace(/CHARACTER "/g, '').replace(/"/g, '')).join(' and ');
 
-    // ─── שלב 2: תרגום סצנה ─────────────────────────────────────────────────────
+    // ─── שלב 2: תרגום סצנה + סביבה ────────────────────────────────────────────
     const sceneEn = (await callAI([
       {
         role: 'system',
-        content: `Translate this Hebrew children's story excerpt to English in 2 sentences.
-Describe ONLY: what the main characters are doing right now + where they are + key objects.
-Do NOT describe character appearances. Output English only.`
+        content: `Translate this Hebrew children's story paragraph into 2-3 descriptive English sentences for an illustrator.
+
+Include:
+- Action: What are the characters doing right now?
+- Environment: Describe the background clearly and specifically (e.g., "A sunny beach with golden sand and calm blue waves", "A busy school corridor with lockers and colorful posters"). Do NOT use the words "blurry" or "not described".
+- The main characters must be implied to be in the center foreground.
+
+Output English only.`
       },
-      { role: 'user', content: `"${lastStoryMsg.slice(0, 500)}"` }
-    ], 80, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
+      { role: 'user', content: `"${recentScene.slice(0, 600)}"` }
+    ], 120, 'llama-3.1-8b-instant')).trim().replace(/["""'']/g, '');
 
-    // ─── שלב 3: בניית פרומפט DALL-E ────────────────────────────────────────────
-    // מטרה: דמויות ראשיות תמיד בחזית עם אותו מראה, הרקע משתנה לפי הסיטואציה
-    const fullImagePrompt = `Pixar 3D animation style, children's book illustration, soft warm lighting, vibrant colors.
+    console.log('[Illustrate] Scene (EN):', sceneEn);
 
-MAIN CHARACTERS (foreground — large and prominent):
-${characterAnchors}
-These characters MUST appear in every illustration with EXACTLY the appearance described above — same hair, same clothes, same features every time. They stand in the CENTER FOREGROUND, large and clearly visible.
+    // ─── שלב 3: פרומפט סופי ל-DALL-E ───────────────────────────────────────────
+    const fullImagePrompt = `3D Disney-Pixar animation style, high-quality children's book illustration, cinematic lighting, vibrant and warm colors.
 
-CURRENT SCENE:
+Main Characters to include (${charCount} character${charCount > 1 ? 's' : ''}):
+${characterAnchors.replace(/TOTAL_CHARACTERS:\s*\d+\n?/i, '').trim()}
+
+Current Scene Description:
 ${sceneEn}
 
-BACKGROUND:
-Match the setting of the scene (outdoors, beach, school, forest, etc.). Background may naturally include other small, blurry, out-of-focus figures if the scene implies a public place — but they must remain small and in the far background. The main characters above are always the clear focal point.
-
-CONSISTENCY RULE: The main characters' appearance must match the descriptions above precisely — hair color, hair style, clothing colors and style must not change between illustrations.`;
+Mandatory Consistency Rules:
+1. Visual Lock: The hair, face, and clothing of ${charNames || 'the main characters'} MUST be identical to the descriptions above — same colors, same style, no variation.
+2. Characters stand in the CENTER FOREGROUND, large and clearly visible, as the main focus.
+3. Background: Match the setting described in the scene. Keep it clear and relevant to the story.
+4. No Hallucinations: Do not add extra characters or objects not mentioned in the scene or character bible.
+5. Reference Rule: Maintain the exact same facial features and body proportions for each character to ensure they are recognizable across images.`;
 
     console.log(`[Illustrate] charCount=${charCount} names="${charNames}"`);
-    console.log('[Illustrate] DALL-E prompt:\n', fullImagePrompt);
-
-    console.log('[Illustrate] full prompt:', fullImagePrompt);
+    console.log('[Illustrate] Final DALL-E prompt:\n', fullImagePrompt);
 
     let dataUrl = null;
 
