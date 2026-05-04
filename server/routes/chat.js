@@ -212,20 +212,22 @@ Output English only.`
     console.log('[Illustrate] Scene (EN):', sceneEn);
 
     // ─── שלב 3: פרומפט סופי ל-DALL-E ───────────────────────────────────────────
-    const fullImagePrompt = `3D Disney-Pixar animation style, high-quality children's book illustration, cinematic lighting, vibrant and warm colors.
+    const description = sceneEn;
+    const visualContext = characterAnchors.replace(/TOTAL_CHARACTERS:\s*\d+\n?/i, '').trim();
 
-Main Characters to include (${charCount} character${charCount > 1 ? 's' : ''}):
-${characterAnchors.replace(/TOTAL_CHARACTERS:\s*\d+\n?/i, '').trim()}
+    const fullImagePrompt = `Create a child-friendly, vibrant, 3D Pixar-style animation storybook illustration.
 
-Current Scene Description:
-${sceneEn}
+SCENE TO DEPICT: "${description}".
 
-Mandatory Consistency Rules:
-1. Visual Lock: The hair, face, and clothing of ${charNames || 'the main characters'} MUST be identical to the descriptions above — same colors, same style, no variation.
-2. Characters stand in the CENTER FOREGROUND, large and clearly visible, as the main focus.
-3. Background: Match the setting described in the scene. Keep it clear and relevant to the story.
-4. No Hallucinations: Do not add extra characters or objects not mentioned in the scene or character bible.
-5. Reference Rule: Maintain the exact same facial features and body proportions for each character to ensure they are recognizable across images.`;
+VISUAL CONSISTENCY & CONTEXT:
+${visualContext}
+
+STRICT INSTRUCTIONS:
+1. ACCURACY: Ensure every detail mentioned in the "SCENE TO DEPICT" is accurately represented.
+2. CONSISTENCY: Maintain the same character designs, clothing, and environment style as described in the "VISUAL CONSISTENCY & CONTEXT".
+3. STYLE: Use a consistent 3D animation style (like Pixar/Disney) throughout all illustrations for this story.
+4. NO TEXT: Do not include any text, letters, numbers, UI elements, or speech bubbles.
+5. COMPOSITION: High quality, colorful, and engaging for children.`;
 
     console.log(`[Illustrate] charCount=${charCount} names="${charNames}"`);
     console.log('[Illustrate] Final DALL-E prompt:\n', fullImagePrompt);
